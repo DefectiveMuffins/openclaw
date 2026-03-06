@@ -91,6 +91,11 @@ if "%SKIP_BUILD%"=="0" (
     pause
     exit /b 1
   )
+  echo Building Control UI assets before launch...
+  call :run_pnpm ui:build
+  if errorlevel 1 (
+    echo Control UI build failed locally. Falling back to any existing prebuilt assets.
+  )
   echo.
 ) else (
   echo Skipping build because OPENCLAW_SKIP_BUILD=1.
@@ -176,3 +181,5 @@ exit /b %ERRORLEVEL%
 :preflight_cli
 node dist\index.js --version >nul 2>&1
 exit /b %ERRORLEVEL%
+
+
