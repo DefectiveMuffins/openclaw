@@ -1,4 +1,5 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import { collectRecentIdentifiers, scoreMessageRelevance } from "../compaction.js";
 
 const CHARS_PER_TOKEN_ESTIMATE = 4;
 // Keep a conservative input budget to absorb tokenizer variance and provider framing overhead.
@@ -223,8 +224,13 @@ function compactExistingToolResultsInPlace(params: {
     return 0;
   }
 
-  let reduced = 0;
-  for (let i = 0; i < messages.length; i++) {
+  const recentContextMessages = messages.filter((msg) => !isToolResultMessage(msg));
+  const activeIdentifiers = collectRecentIdentifiers(
+    recentContextMessages.length > 0 ? recentContextMessages : messages,
+  );
+
+  const candidates: Array<{ index: number; before: number; relevance: number }> = [];
+  for (let i = 0; i < messages.length; i += 1) {
     const msg = messages[i];
     if (!isToolResultMessage(msg)) {
       continue;
@@ -235,14 +241,26 @@ function compactExistingToolResultsInPlace(params: {
       continue;
     }
 
+    candidates.push({
+      index: i,
+      before,
+      relevance: scoreMessageRelevance(msg, activeIdentifiers),
+    });
+  }
+
+  candidates.sort((a, b) => a.relevance - b.relevance || a.index - b.index);
+
+  let reduced = 0;
+  for (const candidate of candidates) {
+    const msg = messages[candidate.index];
     const compacted = replaceToolResultText(msg, PREEMPTIVE_TOOL_RESULT_COMPACTION_PLACEHOLDER);
     applyMessageMutationInPlace(msg, compacted);
     const after = estimateMessageChars(msg);
-    if (after >= before) {
+    if (after >= candidate.before) {
       continue;
     }
 
-    reduced += before - after;
+    reduced += candidate.before - after;
     if (reduced >= charsNeeded) {
       break;
     }
@@ -287,7 +305,7 @@ function enforceToolResultContextBudgetInPlace(params: {
     return;
   }
 
-  // Compact oldest tool outputs first until the context is back under budget.
+  // Compact the least relevant tool outputs first until the context is back under budget.
   compactExistingToolResultsInPlace({
     messages,
     charsNeeded: currentChars - contextBudgetChars,

@@ -2,6 +2,10 @@ import type { DeliveryContext } from "../utils/delivery-context.js";
 import type { SubagentRunOutcome } from "./subagent-announce.js";
 import type { SubagentLifecycleEndedReason } from "./subagent-lifecycle-events.js";
 import type { SpawnSubagentMode } from "./subagent-spawn.js";
+import type {
+  SubagentDelegationRole,
+  SubagentResponseFormat,
+} from "./subagent-result-contract.js";
 
 export type SubagentRunRecord = {
   runId: string;
@@ -13,6 +17,11 @@ export type SubagentRunRecord = {
   cleanup: "delete" | "keep";
   label?: string;
   model?: string;
+  role?: SubagentDelegationRole;
+  deliverable?: string;
+  acceptance?: string[];
+  responseFormat?: SubagentResponseFormat;
+  readOnly?: boolean;
   runTimeoutSeconds?: number;
   spawnMode?: SpawnSubagentMode;
   createdAt: number;

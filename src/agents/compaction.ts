@@ -20,6 +20,47 @@ const MERGE_SUMMARIES_INSTRUCTIONS =
 const IDENTIFIER_PRESERVATION_INSTRUCTIONS =
   "Preserve all opaque identifiers exactly as written (no shortening or reconstruction), " +
   "including UUIDs, hashes, IDs, tokens, API keys, hostnames, IPs, ports, URLs, and file names.";
+const DEFAULT_RELEVANCE_IDENTIFIER_WINDOW = 12;
+const MAX_IDENTIFIER_SOURCE_CHARS = 2_000;
+const MAX_IDENTIFIERS_PER_MESSAGE = 128;
+const MAX_RECENT_IDENTIFIERS = 512;
+const FUNCTION_IDENTIFIER_PATTERN = /\b[A-Za-z_][A-Za-z0-9_]{2,}(?=\s*\()/g;
+const SCOPED_IDENTIFIER_PATTERN = /\b[A-Za-z_][A-Za-z0-9_]*(?:(?:\.|::)[A-Za-z_][A-Za-z0-9_]*)+\b/g;
+const BACKTICK_IDENTIFIER_PATTERN = /`([^`\n]+)`/g;
+const STOP_IDENTIFIER_WORDS = new Set([
+  "the",
+  "and",
+  "with",
+  "from",
+  "that",
+  "this",
+  "then",
+  "when",
+  "where",
+  "which",
+  "what",
+  "into",
+  "need",
+  "make",
+  "open",
+  "read",
+  "write",
+  "edit",
+  "file",
+  "files",
+  "tool",
+  "tools",
+  "message",
+  "messages",
+  "user",
+  "assistant",
+  "result",
+  "error",
+  "true",
+  "false",
+  "null",
+  "undefined",
+]);
 
 export type CompactionSummarizationInstructions = {
   identifierPolicy?: AgentCompactionIdentifierPolicy;
@@ -62,6 +103,192 @@ export function estimateMessagesTokens(messages: AgentMessage[]): number {
   // SECURITY: toolResult.details can contain untrusted/verbose payloads; never include in LLM-facing compaction.
   const safe = stripToolResultDetails(messages);
   return safe.reduce((sum, message) => sum + estimateTokens(message), 0);
+}
+
+function normalizeIdentifier(raw: string): string | null {
+  const trimmed = raw.trim().replace(/^[^\w/\\.:]+|[^\w/\\.:]+$/g, "");
+  if (trimmed.length < 3) {
+    return null;
+  }
+  const lowered = trimmed.toLowerCase();
+  if (STOP_IDENTIFIER_WORDS.has(lowered)) {
+    return null;
+  }
+  return lowered;
+}
+
+function pushIdentifier(set: Set<string>, value: string): void {
+  if (set.size >= MAX_IDENTIFIERS_PER_MESSAGE) {
+    return;
+  }
+  const normalized = normalizeIdentifier(value);
+  if (!normalized) {
+    return;
+  }
+  set.add(normalized);
+}
+
+function collectMessageTextSegments(message: AgentMessage): string[] {
+  const segments: string[] = [];
+  const msgRecord = message as unknown as Record<string, unknown>;
+  const fields: unknown[] = [
+    msgRecord.content,
+    msgRecord.toolName,
+    msgRecord.toolCallId,
+    msgRecord.tool_name,
+    msgRecord.tool_call_id,
+  ];
+
+  for (const field of fields) {
+    if (typeof field === "string") {
+      segments.push(field);
+      continue;
+    }
+    if (!Array.isArray(field)) {
+      continue;
+    }
+    for (const block of field) {
+      if (!block || typeof block !== "object") {
+        continue;
+      }
+      const typed = block as {
+        type?: unknown;
+        text?: unknown;
+        thinking?: unknown;
+        name?: unknown;
+        arguments?: unknown;
+      };
+      if (typeof typed.text === "string") {
+        segments.push(typed.text);
+      }
+      if (typeof typed.thinking === "string") {
+        segments.push(typed.thinking);
+      }
+      if (typed.type === "toolCall" && typeof typed.name === "string") {
+        segments.push(typed.name);
+      }
+      if (typed.type === "toolCall" && typed.arguments !== undefined) {
+        try {
+          const serialized = JSON.stringify(typed.arguments);
+          if (serialized) {
+            segments.push(serialized);
+          }
+        } catch {
+          // Ignore unserializable tool-call arguments for relevance scoring.
+        }
+      }
+    }
+  }
+
+  return segments;
+}
+
+function addIdentifiersFromText(text: string, identifiers: Set<string>): void {
+  const limited = text.slice(0, MAX_IDENTIFIER_SOURCE_CHARS);
+  for (const raw of limited.matchAll(FUNCTION_IDENTIFIER_PATTERN)) {
+    if (raw[0]) {
+      pushIdentifier(identifiers, raw[0]);
+    }
+  }
+  for (const raw of limited.matchAll(SCOPED_IDENTIFIER_PATTERN)) {
+    if (raw[0]) {
+      pushIdentifier(identifiers, raw[0]);
+    }
+  }
+  for (const match of limited.matchAll(BACKTICK_IDENTIFIER_PATTERN)) {
+    const value = match[1];
+    if (!value) {
+      continue;
+    }
+    for (const token of value.split(/\s+/)) {
+      if (!token) {
+        continue;
+      }
+      pushIdentifier(identifiers, token);
+    }
+  }
+  for (const rawToken of limited.split(/\s+/)) {
+    if (!rawToken) {
+      continue;
+    }
+    if (!rawToken.includes("/") && !rawToken.includes("\\")) {
+      continue;
+    }
+    pushIdentifier(identifiers, rawToken);
+  }
+}
+
+function extractMessageIdentifiers(message: AgentMessage): Set<string> {
+  const identifiers = new Set<string>();
+  for (const segment of collectMessageTextSegments(message)) {
+    if (identifiers.size >= MAX_IDENTIFIERS_PER_MESSAGE) {
+      break;
+    }
+    addIdentifiersFromText(segment, identifiers);
+  }
+  return identifiers;
+}
+
+export function collectRecentIdentifiers(
+  messages: AgentMessage[],
+  windowSize?: number,
+): Set<string> {
+  const window = Math.max(1, Math.floor(windowSize ?? DEFAULT_RELEVANCE_IDENTIFIER_WINDOW));
+  const start = Math.max(0, messages.length - window);
+  const recent = new Set<string>();
+  for (let i = start; i < messages.length; i += 1) {
+    for (const identifier of extractMessageIdentifiers(messages[i])) {
+      recent.add(identifier);
+      if (recent.size >= MAX_RECENT_IDENTIFIERS) {
+        return recent;
+      }
+    }
+  }
+  return recent;
+}
+
+export function scoreMessageRelevance(
+  message: AgentMessage,
+  recentIdentifiers: ReadonlySet<string>,
+): number {
+  if (recentIdentifiers.size === 0) {
+    return 0;
+  }
+  let overlap = 0;
+  for (const identifier of extractMessageIdentifiers(message)) {
+    if (recentIdentifiers.has(identifier)) {
+      overlap += 1;
+    }
+  }
+  return overlap;
+}
+
+function scoreChunkRelevance(
+  chunk: AgentMessage[],
+  recentIdentifiers: ReadonlySet<string>,
+): number {
+  return chunk.reduce((sum, message) => sum + scoreMessageRelevance(message, recentIdentifiers), 0);
+}
+
+function resolveDropChunkIndex(params: {
+  chunks: AgentMessage[][];
+  pruningStrategy: "recency" | "relevance";
+  recentIdentifiers: ReadonlySet<string>;
+}): number {
+  if (params.pruningStrategy !== "relevance" || params.recentIdentifiers.size === 0) {
+    return 0;
+  }
+
+  let bestIndex = 0;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < params.chunks.length; i += 1) {
+    const score = scoreChunkRelevance(params.chunks[i], params.recentIdentifiers);
+    if (score < bestScore) {
+      bestScore = score;
+      bestIndex = i;
+    }
+  }
+  return bestIndex;
 }
 
 function estimateCompactionMessageTokens(message: AgentMessage): number {
@@ -389,6 +616,8 @@ export function pruneHistoryForContextShare(params: {
   maxContextTokens: number;
   maxHistoryShare?: number;
   parts?: number;
+  pruningStrategy?: "recency" | "relevance";
+  recentIdentifierWindow?: number;
 }): {
   messages: AgentMessage[];
   droppedMessagesList: AgentMessage[];
@@ -405,6 +634,8 @@ export function pruneHistoryForContextShare(params: {
   let droppedChunks = 0;
   let droppedMessages = 0;
   let droppedTokens = 0;
+  const pruningStrategy = params.pruningStrategy ?? "recency";
+  const recentIdentifierWindow = params.recentIdentifierWindow;
 
   const parts = normalizeParts(params.parts ?? DEFAULT_PARTS, keptMessages.length);
 
@@ -413,8 +644,17 @@ export function pruneHistoryForContextShare(params: {
     if (chunks.length <= 1) {
       break;
     }
-    const [dropped, ...rest] = chunks;
-    const flatRest = rest.flat();
+    const recentIdentifiers =
+      pruningStrategy === "relevance"
+        ? collectRecentIdentifiers(keptMessages, recentIdentifierWindow)
+        : new Set<string>();
+    const dropChunkIndex = resolveDropChunkIndex({
+      chunks,
+      pruningStrategy,
+      recentIdentifiers,
+    });
+    const dropped = chunks[dropChunkIndex] ?? [];
+    const flatRest = chunks.filter((_, index) => index !== dropChunkIndex).flat();
 
     // After dropping a chunk, repair tool_use/tool_result pairing to handle
     // orphaned tool_results (whose tool_use was in the dropped chunk).

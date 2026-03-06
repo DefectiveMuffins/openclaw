@@ -57,6 +57,11 @@ export type ResolvedMemorySearchConfig = {
   query: {
     maxResults: number;
     minScore: number;
+    routing: {
+      enabled: boolean;
+      maxQueries: number;
+      deepQueryThreshold: number;
+    };
     hybrid: {
       enabled: boolean;
       vectorWeight: number;
@@ -71,6 +76,12 @@ export type ResolvedMemorySearchConfig = {
         halfLifeDays: number;
       };
     };
+  };
+  workingSet: {
+    enabled: boolean;
+    sources: Array<"toolResults" | "subagentReports">;
+    ttlMs: number;
+    maxEntries: number;
   };
   cache: {
     enabled: boolean;
@@ -89,6 +100,12 @@ const DEFAULT_SESSION_DELTA_BYTES = 100_000;
 const DEFAULT_SESSION_DELTA_MESSAGES = 50;
 const DEFAULT_MAX_RESULTS = 6;
 const DEFAULT_MIN_SCORE = 0.35;
+const DEFAULT_ROUTING_ENABLED = false;
+const DEFAULT_ROUTING_MAX_QUERIES = 3;
+const DEFAULT_ROUTING_DEEP_QUERY_THRESHOLD = 80;
+const DEFAULT_WORKING_SET_ENABLED = false;
+const DEFAULT_WORKING_SET_TTL_MS = 1_800_000;
+const DEFAULT_WORKING_SET_MAX_ENTRIES = 200;
 const DEFAULT_HYBRID_ENABLED = true;
 const DEFAULT_HYBRID_VECTOR_WEIGHT = 0.7;
 const DEFAULT_HYBRID_TEXT_WEIGHT = 0.3;
@@ -235,6 +252,32 @@ function mergeConfig(
     maxResults: overrides?.query?.maxResults ?? defaults?.query?.maxResults ?? DEFAULT_MAX_RESULTS,
     minScore: overrides?.query?.minScore ?? defaults?.query?.minScore ?? DEFAULT_MIN_SCORE,
   };
+  const routing = {
+    enabled:
+      overrides?.query?.routing?.enabled ??
+      defaults?.query?.routing?.enabled ??
+      DEFAULT_ROUTING_ENABLED,
+    maxQueries:
+      overrides?.query?.routing?.maxQueries ??
+      defaults?.query?.routing?.maxQueries ??
+      DEFAULT_ROUTING_MAX_QUERIES,
+    deepQueryThreshold:
+      overrides?.query?.routing?.deepQueryThreshold ??
+      defaults?.query?.routing?.deepQueryThreshold ??
+      DEFAULT_ROUTING_DEEP_QUERY_THRESHOLD,
+  };
+  const workingSet = {
+    enabled: overrides?.workingSet?.enabled ?? defaults?.workingSet?.enabled ?? DEFAULT_WORKING_SET_ENABLED,
+    sources: [
+      ...(defaults?.workingSet?.sources ?? []),
+      ...(overrides?.workingSet?.sources ?? []),
+    ],
+    ttlMs: overrides?.workingSet?.ttlMs ?? defaults?.workingSet?.ttlMs ?? DEFAULT_WORKING_SET_TTL_MS,
+    maxEntries:
+      overrides?.workingSet?.maxEntries ??
+      defaults?.workingSet?.maxEntries ??
+      DEFAULT_WORKING_SET_MAX_ENTRIES,
+  };
   const hybrid = {
     enabled:
       overrides?.query?.hybrid?.enabled ??
@@ -286,6 +329,19 @@ function mergeConfig(
   const normalizedVectorWeight = sum > 0 ? vectorWeight / sum : DEFAULT_HYBRID_VECTOR_WEIGHT;
   const normalizedTextWeight = sum > 0 ? textWeight / sum : DEFAULT_HYBRID_TEXT_WEIGHT;
   const candidateMultiplier = clampInt(hybrid.candidateMultiplier, 1, 20);
+  const routingMaxQueries = clampInt(routing.maxQueries, 1, 5);
+  const deepQueryThreshold = clampInt(routing.deepQueryThreshold, 20, 500);
+  const workingSetSources = Array.from(
+    new Set(
+      (workingSet.sources.length > 0
+        ? workingSet.sources
+        : (["toolResults", "subagentReports"] as const)
+      ).filter(
+        (value): value is "toolResults" | "subagentReports" =>
+          value === "toolResults" || value === "subagentReports",
+      ),
+    ),
+  );
   const temporalDecayHalfLifeDays = Math.max(
     1,
     Math.floor(
@@ -320,6 +376,11 @@ function mergeConfig(
     query: {
       ...query,
       minScore,
+      routing: {
+        enabled: Boolean(routing.enabled),
+        maxQueries: routingMaxQueries,
+        deepQueryThreshold,
+      },
       hybrid: {
         enabled: Boolean(hybrid.enabled),
         vectorWeight: normalizedVectorWeight,
@@ -336,6 +397,12 @@ function mergeConfig(
           halfLifeDays: temporalDecayHalfLifeDays,
         },
       },
+    },
+    workingSet: {
+      enabled: Boolean(workingSet.enabled),
+      sources: workingSetSources,
+      ttlMs: clampInt(workingSet.ttlMs, 1_000, Number.MAX_SAFE_INTEGER),
+      maxEntries: clampInt(workingSet.maxEntries, 1, 1_000),
     },
     cache: {
       enabled: Boolean(cache.enabled),

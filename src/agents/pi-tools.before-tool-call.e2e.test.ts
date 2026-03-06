@@ -6,7 +6,8 @@ import {
 } from "../infra/diagnostic-events.js";
 import { resetDiagnosticSessionStateForTest } from "../logging/diagnostic-session-state.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
-import { wrapToolWithBeforeToolCallHook } from "./pi-tools.before-tool-call.js";
+import { getDelegationTracking } from "./delegation-enforcement.js";
+import { type HookContext, wrapToolWithBeforeToolCallHook } from "./pi-tools.before-tool-call.js";
 import { CRITICAL_THRESHOLD, GLOBAL_CIRCUIT_BREAKER_THRESHOLD } from "./tool-loop-detection.js";
 import type { AnyAgentTool } from "./tools/common.js";
 
@@ -46,7 +47,7 @@ describe("before_tool_call loop detection behavior", () => {
   function createWrappedTool(
     name: string,
     execute: ReturnType<typeof vi.fn>,
-    loopDetectionContext = enabledLoopDetectionContext,
+    loopDetectionContext: HookContext = enabledLoopDetectionContext,
   ) {
     return wrapToolWithBeforeToolCallHook(
       { name, execute } as unknown as AnyAgentTool,
@@ -148,6 +149,30 @@ describe("before_tool_call loop detection behavior", () => {
     expect(loopEvent?.toolName).toBe(params.toolName);
   }
 
+  it("records successful subagent spawns for top-level delegation enforcement", async () => {
+    const execute = vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "spawned" }],
+      details: { status: "accepted", childSessionKey: "agent:main:subagent:child-1" },
+    });
+    const tool = createWrappedTool("sessions_spawn", execute);
+
+    await tool.execute(
+      "spawn-1",
+      { task: "Research topic", runtime: "subagent" },
+      undefined,
+      undefined,
+    );
+
+    expect(
+      getDelegationTracking({
+        sessionKey: enabledLoopDetectionContext.sessionKey,
+        sessionId: enabledLoopDetectionContext.agentId,
+      }),
+    ).toEqual({
+      spawnedSubagentCount: 1,
+      childSessionKeys: ["agent:main:subagent:child-1"],
+    });
+  });
   it("blocks known poll loops when no progress repeats", async () => {
     const { tool, params } = createNoProgressProcessFixture("sess-1");
 
@@ -318,4 +343,57 @@ describe("before_tool_call loop detection behavior", () => {
       });
     });
   });
+  it("returns cached results for repeated cacheable tool calls", async () => {
+    const execute = vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "cached value" }],
+      details: { ok: true },
+    });
+    const tool = createWrappedTool("read", execute, {
+      ...enabledLoopDetectionContext,
+      sessionKey: "cache-session",
+      toolResultCache: { enabled: true, ttlMs: 30_000, maxEntries: 100 },
+    });
+
+    const params = { path: "/tmp/value.txt" };
+    const first = await tool.execute("cache-1", params, undefined, undefined);
+    const second = await tool.execute("cache-2", params, undefined, undefined);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(second).toEqual(first);
+  });
+
+  it("invalidates cached reads after mutating tool calls", async () => {
+    const readExecute = vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "fresh read" }],
+      details: { ok: true },
+    });
+    const writeExecute = vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "written" }],
+      details: { ok: true },
+    });
+
+    const cacheContext = {
+      ...enabledLoopDetectionContext,
+      sessionKey: "cache-invalidation-session",
+      toolResultCache: { enabled: true, ttlMs: 30_000, maxEntries: 100 },
+    };
+
+    const readTool = createWrappedTool("read", readExecute, cacheContext);
+    const writeTool = createWrappedTool("write", writeExecute, cacheContext);
+
+    await readTool.execute("read-1", { path: "/tmp/value.txt" }, undefined, undefined);
+    await readTool.execute("read-2", { path: "/tmp/value.txt" }, undefined, undefined);
+    expect(readExecute).toHaveBeenCalledTimes(1);
+
+    await writeTool.execute(
+      "write-1",
+      { path: "/tmp/value.txt", content: "next" },
+      undefined,
+      undefined,
+    );
+
+    await readTool.execute("read-3", { path: "/tmp/value.txt" }, undefined, undefined);
+    expect(readExecute).toHaveBeenCalledTimes(2);
+  });
 });
+

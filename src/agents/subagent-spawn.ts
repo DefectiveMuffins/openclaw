@@ -18,6 +18,10 @@ import { AGENT_LANE_SUBAGENT } from "./lanes.js";
 import { resolveSubagentSpawnModelSelection } from "./model-selection.js";
 import { resolveSandboxRuntimeStatus } from "./sandbox/runtime-status.js";
 import { buildSubagentSystemPrompt } from "./subagent-announce.js";
+import {
+  type SubagentDelegationRole,
+  type SubagentResponseFormat,
+} from "./subagent-result-contract.js";
 import { getSubagentDepthFromSessionStore } from "./subagent-depth.js";
 import { countActiveRunsForSession, registerSubagentRun } from "./subagent-registry.js";
 import { readStringParam } from "./tools/common.js";
@@ -65,6 +69,10 @@ export type SpawnSubagentParams = {
   mode?: SpawnSubagentMode;
   cleanup?: "delete" | "keep";
   sandbox?: SpawnSubagentSandboxMode;
+  role?: SubagentDelegationRole;
+  deliverable?: string;
+  acceptance?: string[];
+  responseFormat?: SubagentResponseFormat;
   expectsCompletionMessage?: boolean;
   attachments?: Array<{
     name: string;
@@ -99,6 +107,11 @@ export type SpawnSubagentResult = {
   mode?: SpawnSubagentMode;
   note?: string;
   modelApplied?: boolean;
+  delegation?: {
+    role?: SubagentDelegationRole;
+    responseFormat?: SubagentResponseFormat;
+    readOnly?: boolean;
+  };
   error?: string;
   attachments?: {
     count: number;
@@ -187,6 +200,11 @@ async function ensureThreadBindingForSubagentSpawn(params: {
   childSessionKey: string;
   agentId: string;
   label?: string;
+  role?: SubagentDelegationRole;
+  deliverable?: string;
+  acceptance?: string[];
+  responseFormat?: SubagentResponseFormat;
+  readOnly?: boolean;
   mode: SpawnSubagentMode;
   requesterSessionKey?: string;
   requester: {
@@ -211,6 +229,11 @@ async function ensureThreadBindingForSubagentSpawn(params: {
         childSessionKey: params.childSessionKey,
         agentId: params.agentId,
         label: params.label,
+        role: params.role,
+        deliverable: params.deliverable,
+        acceptance: params.acceptance,
+        responseFormat: params.responseFormat,
+        readOnly: params.readOnly,
         mode: params.mode,
         requester: params.requester,
         threadRequested: true,
@@ -299,7 +322,7 @@ export async function spawnSubagentDirect(
     Number.isFinite(cfg.agents.defaults.subagents.runTimeoutSeconds)
       ? Math.max(0, Math.floor(cfg.agents.defaults.subagents.runTimeoutSeconds))
       : 0;
-  const runTimeoutSeconds =
+  let runTimeoutSeconds =
     typeof params.runTimeoutSeconds === "number" && Number.isFinite(params.runTimeoutSeconds)
       ? Math.max(0, Math.floor(params.runTimeoutSeconds))
       : cfgSubagentTimeout;
@@ -386,10 +409,28 @@ export async function spawnSubagentDirect(
   const childDepth = callerDepth + 1;
   const spawnedByKey = requesterInternalKey;
   const targetAgentConfig = resolveAgentConfig(cfg, targetAgentId);
+  const role = params.role;
+  const readOnly = role === "research" || role === "summarize" || role === "verify";
+  const defaultDelegation = cfg.agents?.defaults?.subagents?.delegation;
+  const delegationEnabled = defaultDelegation?.enabled ?? false;
+  const structuredResultsDefault = defaultDelegation?.structuredResults ?? true;
+  const deliverable = params.deliverable?.trim() || undefined;
+  const acceptance = (params.acceptance ?? []).map((entry) => entry.trim()).filter(Boolean);
+  const responseFormat =
+    params.responseFormat ??
+    (delegationEnabled && structuredResultsDefault !== false ? "structured" : "text");
+  const roleTimeoutSeconds =
+    role === "summarize" ? 120 : role === "verify" ? 180 : readOnly ? 240 : undefined;
+  if (params.runTimeoutSeconds == null && roleTimeoutSeconds !== undefined) {
+    runTimeoutSeconds =
+      runTimeoutSeconds > 0 ? Math.min(runTimeoutSeconds, roleTimeoutSeconds) : roleTimeoutSeconds;
+  }
   const resolvedModel = resolveSubagentSpawnModelSelection({
     cfg,
     agentId: targetAgentId,
     modelOverride,
+    taskDescription: task,
+    role,
   });
 
   const resolvedThinkingDefaultRaw =
@@ -397,7 +438,9 @@ export async function spawnSubagentDirect(
     readStringParam(cfg.agents?.defaults?.subagents ?? {}, "thinking");
 
   let thinkingOverride: string | undefined;
-  const thinkingCandidateRaw = thinkingOverrideRaw || resolvedThinkingDefaultRaw;
+  const roleThinkingDefaultRaw = role === "summarize" ? "minimal" : readOnly ? "low" : undefined;
+  const thinkingCandidateRaw =
+    thinkingOverrideRaw || roleThinkingDefaultRaw || resolvedThinkingDefaultRaw;
   if (thinkingCandidateRaw) {
     const normalized = normalizeThinkLevel(thinkingCandidateRaw);
     if (!normalized) {
@@ -461,6 +504,11 @@ export async function spawnSubagentDirect(
       childSessionKey,
       agentId: targetAgentId,
       label: label || undefined,
+      role,
+      deliverable,
+      acceptance,
+      responseFormat,
+      readOnly,
       mode: spawnMode,
       requesterSessionKey: requesterInternalKey,
       requester: {
@@ -496,6 +544,10 @@ export async function spawnSubagentDirect(
     childSessionKey,
     label: label || undefined,
     task,
+    role,
+    deliverable,
+    acceptance,
+    responseFormat,
     acpEnabled: cfg.acp?.enabled !== false,
     childDepth,
     maxSpawnDepth,
@@ -797,6 +849,11 @@ export async function spawnSubagentDirect(
       label: label || undefined,
       model: resolvedModel,
       runTimeoutSeconds,
+      role,
+      deliverable,
+      acceptance,
+      responseFormat,
+      readOnly,
       expectsCompletionMessage,
       spawnMode,
       attachmentsDir: attachmentAbsDir,
@@ -836,6 +893,11 @@ export async function spawnSubagentDirect(
           childSessionKey,
           agentId: targetAgentId,
           label: label || undefined,
+          role,
+          deliverable,
+          acceptance,
+          responseFormat,
+          readOnly,
           requester: {
             channel: requesterOrigin?.channel,
             accountId: requesterOrigin?.accountId,
@@ -874,6 +936,15 @@ export async function spawnSubagentDirect(
     mode: spawnMode,
     note,
     modelApplied: resolvedModel ? modelApplied : undefined,
+    delegation:
+      role || responseFormat !== "text" || readOnly
+        ? {
+            role,
+            responseFormat,
+            readOnly,
+          }
+        : undefined,
     attachments: attachmentsReceipt,
   };
 }
+

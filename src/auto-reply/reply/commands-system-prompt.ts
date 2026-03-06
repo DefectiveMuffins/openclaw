@@ -4,6 +4,7 @@ import { resolveBootstrapContextForRun } from "../../agents/bootstrap-files.js";
 import { resolveDefaultModelForAgent } from "../../agents/model-selection.js";
 import type { EmbeddedContextFile } from "../../agents/pi-embedded-helpers.js";
 import { createOpenClawCodingTools } from "../../agents/pi-tools.js";
+import { resolveEffectiveToolPolicy } from "../../agents/pi-tools.policy.js";
 import { resolveSandboxRuntimeStatus } from "../../agents/sandbox.js";
 import { buildWorkspaceSkillSnapshot } from "../../agents/skills.js";
 import { getSkillsSnapshotVersion } from "../../agents/skills/refresh.js";
@@ -12,6 +13,7 @@ import { buildAgentSystemPrompt } from "../../agents/system-prompt.js";
 import { buildToolSummaryMap } from "../../agents/tool-summaries.js";
 import type { WorkspaceBootstrapFile } from "../../agents/workspace.js";
 import { getRemoteSkillEligibility } from "../../infra/skills-remote.js";
+import { auditMemoryStaleness } from "../../memory/staleness-audit.js";
 import { buildTtsSystemPromptHint } from "../../tts/tts.js";
 import type { HandleCommandsParams } from "./commands-types.js";
 
@@ -77,6 +79,15 @@ export async function resolveCommandsSystemPromptBundle(
     config: params.cfg,
     agentId: params.agentId,
   });
+  const effectiveToolPolicy = resolveEffectiveToolPolicy({
+    config: params.cfg,
+    sessionKey: params.sessionKey,
+    agentId: sessionAgentId,
+    modelProvider: params.provider,
+    modelId: params.model,
+  });
+  const toolProfile = effectiveToolPolicy.providerProfile ?? effectiveToolPolicy.profile;
+  const memoryStaleness = await auditMemoryStaleness(workspaceDir);
   const defaultModelRef = resolveDefaultModelForAgent({
     cfg: params.cfg,
     agentId: sessionAgentId,
@@ -130,6 +141,8 @@ export async function resolveCommandsSystemPromptBundle(
     runtimeInfo,
     sandboxInfo,
     memoryCitationsMode: params.cfg?.memory?.citations,
+    toolProfile,
+    memoryStalenessHint: memoryStaleness.hint,
   });
 
   return { systemPrompt, tools, skillsPrompt, bootstrapFiles, injectedFiles, sandboxRuntime };

@@ -464,6 +464,39 @@ type PayloadMessage = {
   content?: unknown;
 };
 
+const VOLATILE_SYSTEM_HEADERS = [
+  "\n## Authorized Senders\n",
+  "\n## Current Date & Time\n",
+  "\n## Runtime\n",
+] as const;
+
+type SplitSystemPrompt = {
+  stable: string;
+  volatile: string;
+};
+
+function splitSystemPromptForCacheControl(content: string): SplitSystemPrompt | undefined {
+  let splitIndex = -1;
+  for (const marker of VOLATILE_SYSTEM_HEADERS) {
+    const markerIndex = content.indexOf(marker);
+    if (markerIndex <= 0) {
+      continue;
+    }
+    if (splitIndex === -1 || markerIndex < splitIndex) {
+      splitIndex = markerIndex;
+    }
+  }
+  if (splitIndex <= 0) {
+    return undefined;
+  }
+  const stable = content.slice(0, splitIndex).trimEnd();
+  const volatile = content.slice(splitIndex).trimStart();
+  if (!stable || !volatile) {
+    return undefined;
+  }
+  return { stable, volatile };
+}
+
 /**
  * Inject cache_control into the system message for OpenRouter Anthropic models.
  * OpenRouter passes through Anthropic's cache_control field — caching the system
@@ -491,9 +524,21 @@ function createOpenRouterSystemCacheWrapper(baseStreamFn: StreamFn | undefined):
               continue;
             }
             if (typeof msg.content === "string") {
-              msg.content = [
-                { type: "text", text: msg.content, cache_control: { type: "ephemeral" } },
-              ];
+              const splitPrompt = splitSystemPromptForCacheControl(msg.content);
+              if (splitPrompt) {
+                msg.content = [
+                  { type: "text", text: splitPrompt.stable },
+                  {
+                    type: "text",
+                    text: splitPrompt.volatile,
+                    cache_control: { type: "ephemeral" },
+                  },
+                ];
+              } else {
+                msg.content = [
+                  { type: "text", text: msg.content, cache_control: { type: "ephemeral" } },
+                ];
+              }
             } else if (Array.isArray(msg.content) && msg.content.length > 0) {
               const last = msg.content[msg.content.length - 1];
               if (last && typeof last === "object") {
@@ -851,3 +896,4 @@ export function applyExtraParamsToAgent(
   // server-side compaction for compatible OpenAI Responses payloads.
   agent.streamFn = createOpenAIResponsesContextManagementWrapper(agent.streamFn, merged);
 }
+

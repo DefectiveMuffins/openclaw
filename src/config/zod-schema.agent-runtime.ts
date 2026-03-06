@@ -268,6 +268,7 @@ export const ToolsWebSearchSchema = z
         z.literal("grok"),
         z.literal("gemini"),
         z.literal("kimi"),
+        z.literal("duckduckgo"),
       ])
       .optional(),
     apiKey: z.string().optional().register(sensitive),
@@ -331,7 +332,13 @@ export const ToolsWebSchema = z
   .optional();
 
 export const ToolProfileSchema = z
-  .union([z.literal("minimal"), z.literal("coding"), z.literal("messaging"), z.literal("full")])
+  .union([
+    z.literal("minimal"),
+    z.literal("coding"),
+    z.literal("messaging"),
+    z.literal("orchestrator"),
+    z.literal("full"),
+  ])
   .optional();
 
 type AllowlistPolicy = {
@@ -395,6 +402,8 @@ const ToolExecBaseShape = {
   host: z.enum(["sandbox", "gateway", "node"]).optional(),
   security: z.enum(["deny", "allowlist", "full"]).optional(),
   ask: z.enum(["off", "on-miss", "always"]).optional(),
+  blockDestructive: z.boolean().optional(),
+  destructiveMode: z.enum(["block", "approve"]).optional(),
   node: z.string().optional(),
   pathPrepend: z.array(z.string()).optional(),
   safeBins: z.array(z.string()).optional(),
@@ -421,6 +430,9 @@ const ToolExecSchema = z.object(ToolExecBaseShape).strict().optional();
 const ToolFsSchema = z
   .object({
     workspaceOnly: z.boolean().optional(),
+    allowPaths: z.array(z.string()).optional(),
+    denyPaths: z.array(z.string()).optional(),
+    readOnlyPaths: z.array(z.string()).optional(),
   })
   .strict()
   .optional();
@@ -470,7 +482,23 @@ const ToolLoopDetectionSchema = z
     }
   })
   .optional();
+const ToolResultCacheSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    ttlMs: z.number().int().positive().optional(),
+    maxEntries: z.number().int().positive().optional(),
+    cacheableTools: z.array(z.string()).optional(),
+  })
+  .strict()
+  .optional();
 
+const ToolParallelExecutionSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    maxConcurrent: z.number().int().positive().optional(),
+  })
+  .strict()
+  .optional();
 export const AgentSandboxSchema = z
   .object({
     mode: z.union([z.literal("off"), z.literal("non-main"), z.literal("all")]).optional(),
@@ -522,6 +550,8 @@ export const AgentToolsSchema = z
     exec: AgentToolExecSchema,
     fs: ToolFsSchema,
     loopDetection: ToolLoopDetectionSchema,
+    toolResultCache: ToolResultCacheSchema,
+    parallelExecution: ToolParallelExecutionSchema,
     sandbox: z
       .object({
         tools: ToolPolicySchema,
@@ -637,6 +667,14 @@ export const MemorySearchSchema = z
       .object({
         maxResults: z.number().int().positive().optional(),
         minScore: z.number().min(0).max(1).optional(),
+        routing: z
+          .object({
+            enabled: z.boolean().optional(),
+            maxQueries: z.number().int().positive().optional(),
+            deepQueryThreshold: z.number().int().positive().optional(),
+          })
+          .strict()
+          .optional(),
         hybrid: z
           .object({
             enabled: z.boolean().optional(),
@@ -660,6 +698,17 @@ export const MemorySearchSchema = z
           })
           .strict()
           .optional(),
+      })
+      .strict()
+      .optional(),
+    workingSet: z
+      .object({
+        enabled: z.boolean().optional(),
+        sources: z
+          .array(z.union([z.literal("toolResults"), z.literal("subagentReports")]))
+          .optional(),
+        ttlMs: z.number().int().positive().optional(),
+        maxEntries: z.number().int().positive().optional(),
       })
       .strict()
       .optional(),
@@ -724,6 +773,8 @@ export const ToolsSchema = z
       .strict()
       .optional(),
     loopDetection: ToolLoopDetectionSchema,
+    toolResultCache: ToolResultCacheSchema,
+    parallelExecution: ToolParallelExecutionSchema,
     message: z
       .object({
         allowCrossContextSend: z.boolean().optional(),
@@ -804,3 +855,5 @@ export const ToolsSchema = z
     );
   })
   .optional();
+
+

@@ -443,14 +443,70 @@ function applySkillsPromptLimits(params: { skills: Skill[]; config?: OpenClawCon
   return { skillsForPrompt, truncated, truncatedReason };
 }
 
+
+type SkillsPromptMode = "full" | "compact";
+
+function resolveSkillsPromptMode(config?: OpenClawConfig): SkillsPromptMode {
+  return config?.agents?.defaults?.skills?.promptMode === "compact" ? "compact" : "full";
+}
+
+function escapeXmlAttribute(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function escapeXmlText(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function toOneLineSkillSummary(description: string): string {
+  const oneLine = description.replace(/\s+/g, " ").trim();
+  if (!oneLine) {
+    return "No summary.";
+  }
+  const max = 160;
+  return oneLine.length > max ? `${oneLine.slice(0, max - 1).trimEnd()}...` : oneLine;
+}
+
+function formatCompactSkillsForPrompt(skills: Skill[]): string {
+  if (skills.length === 0) {
+    return "";
+  }
+  const lines = ["<available_skills>"];
+  for (const skill of skills) {
+    const summary = toOneLineSkillSummary(skill.description ?? "");
+    const name = escapeXmlAttribute(skill.name);
+    const location = escapeXmlAttribute(skill.filePath);
+    lines.push(
+      `  <skill name="${name}" location="${location}">${escapeXmlText(summary)}</skill>`,
+    );
+  }
+  lines.push("</available_skills>");
+  return lines.join("\n");
+}
+
+function formatSkillsPrompt(skills: Skill[], mode: SkillsPromptMode): string {
+  const compacted = compactSkillPaths(skills);
+  return mode === "compact"
+    ? formatCompactSkillsForPrompt(compacted)
+    : formatSkillsForPrompt(compacted);
+}
+
 export function buildWorkspaceSkillSnapshot(
   workspaceDir: string,
   opts?: WorkspaceSkillBuildOptions & { snapshotVersion?: number },
 ): SkillSnapshot {
-  const { eligible, prompt, resolvedSkills } = resolveWorkspaceSkillPromptState(workspaceDir, opts);
+  const { eligible, prompt, compactPrompt, resolvedSkills } = resolveWorkspaceSkillPromptState(workspaceDir, opts);
   const skillFilter = normalizeSkillFilter(opts?.skillFilter);
   return {
     prompt,
+    compactPrompt,
     skills: eligible.map((entry) => ({
       name: entry.skill.name,
       primaryEnv: entry.metadata?.primaryEnv,
@@ -485,6 +541,7 @@ function resolveWorkspaceSkillPromptState(
 ): {
   eligible: SkillEntry[];
   prompt: string;
+  compactPrompt: string;
   resolvedSkills: Skill[];
 } {
   const skillEntries = opts?.entries ?? loadSkillEntries(workspaceDir, opts);
@@ -506,14 +563,15 @@ function resolveWorkspaceSkillPromptState(
   const truncationNote = truncated
     ? `⚠️ Skills truncated: included ${skillsForPrompt.length} of ${resolvedSkills.length}. Run \`openclaw skills check\` to audit.`
     : "";
-  const prompt = [
-    remoteNote,
-    truncationNote,
-    formatSkillsForPrompt(compactSkillPaths(skillsForPrompt)),
-  ]
+  const promptMode = resolveSkillsPromptMode(opts?.config);
+  const fullPrompt = formatSkillsPrompt(skillsForPrompt, "full");
+  const compactPrompt = formatSkillsPrompt(skillsForPrompt, "compact");
+  const promptBody = promptMode === "compact" ? compactPrompt : fullPrompt;
+  const prompt = [remoteNote, truncationNote, promptBody].filter(Boolean).join("\n");
+  const compactPromptWithNotes = [remoteNote, truncationNote, compactPrompt]
     .filter(Boolean)
     .join("\n");
-  return { eligible, prompt, resolvedSkills };
+  return { eligible, prompt, compactPrompt: compactPromptWithNotes, resolvedSkills };
 }
 
 export function resolveSkillsPromptForRun(params: {
@@ -522,7 +580,11 @@ export function resolveSkillsPromptForRun(params: {
   config?: OpenClawConfig;
   workspaceDir: string;
 }): string {
-  const snapshotPrompt = params.skillsSnapshot?.prompt?.trim();
+  const promptMode = resolveSkillsPromptMode(params.config);
+  const snapshotPrompt =
+    promptMode === "compact"
+      ? params.skillsSnapshot?.compactPrompt?.trim() || params.skillsSnapshot?.prompt?.trim()
+      : params.skillsSnapshot?.prompt?.trim();
   if (snapshotPrompt) {
     return snapshotPrompt;
   }
@@ -758,3 +820,6 @@ export function buildWorkspaceSkillCommandSpecs(
   }
   return specs;
 }
+
+
+

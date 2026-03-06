@@ -17,6 +17,7 @@ import type {
   ChannelsStatusSnapshot,
   ConfigSnapshot,
   ConfigUiHints,
+  GatewayModelChoice,
   HealthSnapshot,
   LogEntry,
   LogLevel,
@@ -128,6 +129,7 @@ export type AppViewState = {
   agentsList: AgentsListResult | null;
   agentsError: string | null;
   agentsSelectedId: string | null;
+  agentModelChoices: GatewayModelChoice[];
   toolsCatalogLoading: boolean;
   toolsCatalogError: string | null;
   toolsCatalogResult: ToolsCatalogResult | null;
@@ -319,3 +321,4 @@ export type AppViewState = {
     handleCloseSidebar: () => void;
     handleSplitRatioChange: (ratio: number) => void;
   };
+

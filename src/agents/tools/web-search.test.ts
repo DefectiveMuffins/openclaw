@@ -3,9 +3,12 @@ import { withEnv } from "../../test-utils/env.js";
 import { __testing } from "./web-search.js";
 
 const {
+  resolveSearchProvider,
   inferPerplexityBaseUrlFromApiKey,
   resolvePerplexityBaseUrl,
   isDirectPerplexityBaseUrl,
+  parseDuckDuckGoHtmlResults,
+  unwrapDuckDuckGoResultUrl,
   resolvePerplexityRequestModel,
   normalizeBraveLanguageParams,
   normalizeFreshness,
@@ -20,6 +23,52 @@ const {
   extractKimiCitations,
 } = __testing;
 
+
+describe("web_search duckduckgo fallback", () => {
+  it("defaults to duckduckgo when no provider key is configured", () => {
+    withEnv(
+      {
+        BRAVE_API_KEY: undefined,
+        PERPLEXITY_API_KEY: undefined,
+        OPENROUTER_API_KEY: undefined,
+        XAI_API_KEY: undefined,
+        GEMINI_API_KEY: undefined,
+        KIMI_API_KEY: undefined,
+        MOONSHOT_API_KEY: undefined,
+      },
+      () => {
+        expect(resolveSearchProvider(undefined)).toBe("duckduckgo");
+      },
+    );
+  });
+
+  it("accepts explicit duckduckgo provider config", () => {
+    expect(resolveSearchProvider({ provider: "duckduckgo" })).toBe("duckduckgo");
+  });
+
+  it("unwraps duckduckgo redirect urls", () => {
+    expect(
+      unwrapDuckDuckGoResultUrl(
+        "//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fnews%3Fa%3D1%26b%3D2",
+      ),
+    ).toBe("https://example.com/news?a=1&b=2");
+  });
+
+  it("parses duckduckgo html results into title, url, and description", () => {
+    const results = parseDuckDuckGoHtmlResults({
+      html:
+        `<div class="result"><a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpost">GPT-5.4 &amp; launch</a><div class="result__snippet">Latest model update &lt;verified&gt;</div></div>`,
+      count: 5,
+    });
+    expect(results).toEqual([
+      {
+        title: "GPT-5.4 & launch",
+        url: "https://example.com/post",
+        description: "Latest model update <verified>",
+      },
+    ]);
+  });
+});
 describe("web_search perplexity baseUrl defaults", () => {
   it("detects a Perplexity key prefix", () => {
     expect(inferPerplexityBaseUrlFromApiKey("pplx-123")).toBe("direct");

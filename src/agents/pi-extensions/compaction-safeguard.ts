@@ -279,6 +279,7 @@ export default function compactionSafeguardExtension(api: ExtensionAPI): void {
             maxContextTokens: contextWindowTokens,
             maxHistoryShare,
             parts: 2,
+            pruningStrategy: runtime?.pruningStrategy,
           });
           if (pruned.droppedChunks > 0) {
             const newContentRatio = (newContentTokens / contextWindowTokens) * 100;

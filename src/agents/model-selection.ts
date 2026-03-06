@@ -1,4 +1,5 @@
 import type { OpenClawConfig } from "../config/config.js";
+import type { AgentModelRoutingPhase } from "../config/types.agent-defaults.js";
 import { resolveAgentModelPrimaryValue, toAgentModelListLike } from "../config/model-input.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { resolveAgentConfig, resolveAgentEffectiveModelPrimary } from "./agent-scope.js";
@@ -6,6 +7,7 @@ import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "./defaults.js";
 import type { ModelCatalogEntry } from "./model-catalog.js";
 import { splitTrailingAuthProfile } from "./model-ref-profile.js";
 import { normalizeGoogleModelId } from "./models-config.providers.js";
+import { classifyTaskComplexity } from "./subagent-model-tier.js";
 
 const log = createSubsystemLogger("model-selection");
 
@@ -362,17 +364,127 @@ export function resolveSubagentConfiguredModelSelection(params: {
   );
 }
 
+function resolvePhaseRoutedModel(
+  cfg: OpenClawConfig,
+  phase: AgentModelRoutingPhase | undefined,
+): string | undefined {
+  const routing = cfg.agents?.defaults?.modelRouting;
+  if (!routing?.enabled || !phase || phase === "synthesis" || phase === "subagent") {
+    return undefined;
+  }
+  const candidate =
+    phase === "planner"
+      ? routing.plannerModel
+      : phase === "retrieval"
+        ? routing.retrievalModel
+        : phase === "compression"
+          ? routing.compressionModel
+          : phase === "verification"
+            ? routing.verificationModel
+            : undefined;
+  return normalizeModelSelection(candidate);
+}
+
+export function resolveStageAwareModelSelection(params: {
+  cfg: OpenClawConfig;
+  phase?: AgentModelRoutingPhase;
+  evidenceConfidence?: number;
+  cheapPassIndex?: number;
+}): string | undefined {
+  const routing = params.cfg.agents?.defaults?.modelRouting;
+  if (!routing?.enabled) {
+    return undefined;
+  }
+  const minConfidence =
+    typeof routing.escalation?.minConfidence === "number" &&
+    Number.isFinite(routing.escalation.minConfidence)
+      ? Math.max(0, Math.min(1, routing.escalation.minConfidence))
+      : 0.65;
+  const maxCheapPasses =
+    typeof routing.escalation?.maxCheapPasses === "number" &&
+    Number.isFinite(routing.escalation.maxCheapPasses)
+      ? Math.max(0, Math.floor(routing.escalation.maxCheapPasses))
+      : 2;
+  if (
+    typeof params.evidenceConfidence === "number" &&
+    Number.isFinite(params.evidenceConfidence) &&
+    params.evidenceConfidence < minConfidence
+  ) {
+    return undefined;
+  }
+  if (
+    typeof params.cheapPassIndex === "number" &&
+    Number.isFinite(params.cheapPassIndex) &&
+    params.cheapPassIndex > maxCheapPasses
+  ) {
+    return undefined;
+  }
+  return resolvePhaseRoutedModel(params.cfg, params.phase);
+}
+
+export function resolvePhaseAwareThinkLevel(params: {
+  phase?: AgentModelRoutingPhase;
+  thinkLevel?: ThinkLevel;
+}): ThinkLevel | undefined {
+  if (params.thinkLevel !== "adaptive") {
+    return params.thinkLevel;
+  }
+  if (params.phase === "planner" || params.phase === "compression") {
+    return "minimal";
+  }
+  if (
+    params.phase === "retrieval" ||
+    params.phase === "verification" ||
+    params.phase === "subagent"
+  ) {
+    return "low";
+  }
+  return params.thinkLevel;
+}
+
 export function resolveSubagentSpawnModelSelection(params: {
   cfg: OpenClawConfig;
   agentId: string;
   modelOverride?: unknown;
+  taskDescription?: string;
+  role?: "research" | "edit" | "verify" | "summarize";
 }): string {
   const runtimeDefault = resolveDefaultModelForAgent({
     cfg: params.cfg,
     agentId: params.agentId,
   });
+
+  const explicitModel = normalizeModelSelection(params.modelOverride);
+  if (explicitModel) {
+    return explicitModel;
+  }
+
+  const roleRoutedModel =
+    params.role === "research"
+      ? resolvePhaseRoutedModel(params.cfg, "retrieval")
+      : params.role === "summarize"
+        ? resolvePhaseRoutedModel(params.cfg, "compression")
+        : params.role === "verify"
+          ? resolvePhaseRoutedModel(params.cfg, "verification")
+          : undefined;
+  if (roleRoutedModel) {
+    return roleRoutedModel;
+  }
+
+  const autoTierEnabled = params.cfg.agents?.defaults?.subagents?.autoTier === true;
+  if (autoTierEnabled) {
+    const taskComplexity = classifyTaskComplexity(params.taskDescription ?? "");
+    if (taskComplexity === "simple") {
+      const simpleTaskModel = normalizeModelSelection(
+        params.cfg.agents?.defaults?.subagents?.simpleTaskModel,
+      );
+      if (simpleTaskModel) {
+        return simpleTaskModel;
+      }
+    }
+  }
+
   return (
-    normalizeModelSelection(params.modelOverride) ??
     resolveSubagentConfiguredModelSelection({
       cfg: params.cfg,
       agentId: params.agentId,
@@ -636,3 +748,4 @@ export function normalizeModelSelection(value: unknown): string | undefined {
   }
   return undefined;
 }
+

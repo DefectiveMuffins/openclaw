@@ -46,7 +46,7 @@ function buildMemorySection(params: {
     return [];
   }
   const lines = [
-    "## Memory Recall",
+    "## Memory Recall & Persistence",
     "Before answering anything about prior work, decisions, dates, people, preferences, or todos: run memory_search on MEMORY.md + memory/*.md; then use memory_get to pull only the needed lines. If low confidence after search, say you checked.",
   ];
   if (params.citationsMode === "off") {
@@ -58,8 +58,43 @@ function buildMemorySection(params: {
       "Citations: include Source: <path#line> when it helps the user verify memory snippets.",
     );
   }
+  lines.push(
+    "",
+    "### Memory Writing",
+    "After completing significant tasks, learning user preferences, making decisions, or receiving important information:",
+    "- Write to memory/YYYY-MM-DD.md (create memory/ dir if needed; use today's date).",
+    "- APPEND to existing daily files; never overwrite prior entries.",
+    "- Update IDENTITY.md when you learn lasting facts about yourself or the user's expectations.",
+    "- Update USER.md when you learn lasting user preferences, context, or identity details.",
+    "- Format: use markdown headings, bullets, and timestamps for scannability.",
+  );
   lines.push("");
   return lines;
+}
+
+function buildMemoryStalenessNotice(params: { isMinimal: boolean; hint?: string }) {
+  if (params.isMinimal) {
+    return [];
+  }
+  const hint = params.hint?.trim();
+  if (!hint) {
+    return [];
+  }
+  return ["### Memory Freshness Notice", hint, ""];
+}
+
+function buildOrchestratorSection(toolProfile?: string) {
+  if (toolProfile !== "orchestrator") {
+    return [];
+  }
+  return [
+    "## Orchestrator Mode",
+    "You are running in orchestrator mode. You MUST delegate all execution to subagents via sessions_spawn. Your role: understand requests, break into tasks, spawn subagents, and synthesize their results.",
+    "Before doing substantive work or sending a final answer, spawn at least one subagent for the user request. Do not answer directly from your own knowledge.",
+    "You may use read/memory tools for context and write/edit ONLY for memory and identity files (memory/, MEMORY.md, IDENTITY.md, USER.md).",
+    "Never use exec or process directly - delegate to subagents.",
+    "",
+  ];
 }
 
 function buildUserIdentitySection(ownerLine: string | undefined, isMinimal: boolean) {
@@ -231,6 +266,8 @@ export function buildAgentSystemPrompt(params: {
     channel: string;
   };
   memoryCitationsMode?: MemoryCitationsMode;
+  toolProfile?: string;
+  memoryStalenessHint?: string;
 }) {
   const acpEnabled = params.acpEnabled !== false;
   const coreToolSummaries: Record<string, string> = {
@@ -407,6 +444,11 @@ export function buildAgentSystemPrompt(params: {
     isMinimal,
     readToolName,
   });
+  const memoryStalenessNotice = buildMemoryStalenessNotice({
+    isMinimal,
+    hint: params.memoryStalenessHint,
+  });
+  const orchestratorSection = buildOrchestratorSection(params.toolProfile);
   const workspaceNotes = (params.workspaceNotes ?? []).map((note) => note.trim()).filter(Boolean);
 
   // For "none" mode, return just the basic identity line
@@ -472,6 +514,8 @@ export function buildAgentSystemPrompt(params: {
     "",
     ...skillsSection,
     ...memorySection,
+    ...memoryStalenessNotice,
+    ...orchestratorSection,
     // Skip self-update for subagent/none modes
     hasGateway && !isMinimal ? "## OpenClaw Self-Update" : "",
     hasGateway && !isMinimal
@@ -550,10 +594,6 @@ export function buildAgentSystemPrompt(params: {
           .join("\n")
       : "",
     params.sandboxInfo?.enabled ? "" : "",
-    ...buildUserIdentitySection(ownerLine, isMinimal),
-    ...buildTimeSection({
-      userTimezone,
-    }),
     "## Workspace Files (injected)",
     "These user-editable files are loaded by OpenClaw and included below in Project Context.",
     "",
@@ -654,6 +694,12 @@ export function buildAgentSystemPrompt(params: {
       "",
     );
   }
+  lines.push(
+    ...buildUserIdentitySection(ownerLine, isMinimal),
+    ...buildTimeSection({
+      userTimezone,
+    }),
+  );
 
   lines.push(
     "## Runtime",
@@ -702,3 +748,4 @@ export function buildRuntimeLine(
     .filter(Boolean)
     .join(" | ")}`;
 }
+

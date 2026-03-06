@@ -48,6 +48,29 @@ export type SessionAcpMeta = {
   lastError?: string;
 };
 
+export type SessionAgentRoutingSummary = {
+  phase?: "planner" | "retrieval" | "compression" | "subagent" | "synthesis" | "verification";
+  cheapPath?: boolean;
+  escalated?: boolean;
+  cheapPassIndex?: number;
+  evidenceConfidence?: number;
+  updatedAt?: number;
+};
+
+export type SessionAgenticCounters = {
+  routedRuns?: number;
+  cheapPathRuns?: number;
+  escalations?: number;
+  delegationReports?: number;
+  structuredDelegationReports?: number;
+  delegationConflictSignals?: number;
+  updatedAt?: number;
+};
+
+export type SessionAgenticDedupe = {
+  delegationReportIds?: string[];
+};
+
 export type AcpSessionRuntimeOptions = {
   /**
    * ACP runtime mode set via session/set_mode (for example: "plan", "normal", "auto").
@@ -146,6 +169,8 @@ export type SessionEntry = {
   compactionCount?: number;
   memoryFlushAt?: number;
   memoryFlushCompactionCount?: number;
+  /** Number of turns since the last successful memory flush. */
+  memoryFlushTurnCount?: number;
   cliSessionIds?: Record<string, string>;
   claudeCliSessionId?: string;
   label?: string;
@@ -163,6 +188,9 @@ export type SessionEntry = {
   lastThreadId?: string | number;
   skillsSnapshot?: SessionSkillSnapshot;
   systemPromptReport?: SessionSystemPromptReport;
+  lastAgentRouting?: SessionAgentRoutingSummary;
+  agenticCounters?: SessionAgenticCounters;
+  agenticDedupe?: SessionAgenticDedupe;
   acp?: SessionAcpMeta;
 };
 
@@ -276,6 +304,7 @@ export type GroupKeyResolution = {
 
 export type SessionSkillSnapshot = {
   prompt: string;
+  compactPrompt?: string;
   skills: Array<{ name: string; primaryEnv?: string; requiredEnv?: string[] }>;
   /** Normalized agent-level filter used to build this snapshot; undefined means unrestricted. */
   skillFilter?: string[];

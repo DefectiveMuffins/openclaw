@@ -132,6 +132,38 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("Subagent details");
   });
 
+  it("includes memory recall and writing guidance when memory tools are available", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolNames: ["memory_search", "memory_get"],
+    });
+
+    expect(prompt).toContain("## Memory Recall & Persistence");
+    expect(prompt).toContain("### Memory Writing");
+    expect(prompt).toContain("memory/YYYY-MM-DD.md");
+    expect(prompt).toContain("APPEND");
+  });
+
+  it("adds orchestrator mode instructions for orchestrator profile", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolProfile: "orchestrator",
+    });
+
+    expect(prompt).toContain("## Orchestrator Mode");
+    expect(prompt).toContain("MUST delegate all execution to subagents via sessions_spawn");
+    expect(prompt).toContain("Never use exec or process directly");
+  });
+
+  it("renders memory staleness hints when provided", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      memoryStalenessHint: "Memory appears stale (72h since last update).",
+    });
+
+    expect(prompt).toContain("Memory appears stale (72h since last update).");
+  });
+
   it("includes skills in minimal prompt mode when skillsPrompt is provided (cron regression)", () => {
     // Isolated cron sessions use promptMode="minimal" but must still receive skills.
     const skillsPrompt =

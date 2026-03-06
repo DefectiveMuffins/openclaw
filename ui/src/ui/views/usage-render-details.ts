@@ -78,6 +78,17 @@ function renderSessionSummary(
   if (session.model) {
     badges.push(`model:${session.model}`);
   }
+  if (session.routing?.cheapPath) {
+    badges.push(`route:cheap:${session.routing.phase ?? "run"}`);
+  } else if (session.routing?.phase && session.routing.phase !== "synthesis") {
+    badges.push(`route:${session.routing.phase}`);
+  }
+  if ((session.usage?.agentic?.memorySearch?.calls ?? 0) > 0) {
+    badges.push(`rag:${session.usage?.agentic?.memorySearch?.calls}`);
+  }
+  if ((session.usage?.agentic?.delegation?.spawnCalls ?? 0) > 0) {
+    badges.push(`delegate:${session.usage?.agentic?.delegation?.spawnCalls}`);
+  }
 
   // Always use the full tool list for stable layout; update counts when filtering
   const baseTools = usage.toolUsage?.tools.slice(0, 6) ?? [];
@@ -315,7 +326,10 @@ function renderSessionDetailPanel(
             hasRange ? timeSeriesCursorStart : null,
             hasRange ? timeSeriesCursorEnd : null,
           )}
-          ${renderContextPanel(session.contextWeight, usage, contextExpanded, onToggleContextExpanded)}
+          <div class="session-detail-sidepanels">
+            ${renderAgenticPanel(session)}
+            ${renderContextPanel(session.contextWeight, usage, contextExpanded, onToggleContextExpanded)}
+          </div>
         </div>
       </div>
     </div>
@@ -715,6 +729,90 @@ function renderTimeSeriesCompact(
   `;
 }
 
+function formatConfidenceScore(score?: number): string {
+  if (!(typeof score === "number") || !Number.isFinite(score)) {
+    return "-";
+  }
+  return `${Math.round(score * 100)}%`;
+}
+
+function joinCompactList(values: string[], maxItems = 3): string {
+  if (values.length === 0) {
+    return "-";
+  }
+  if (values.length <= maxItems) {
+    return values.join(", ");
+  }
+  return `${values.slice(0, maxItems).join(", ")} +${values.length - maxItems}`;
+}
+
+function renderAgenticPanel(session: UsageSessionEntry) {
+  const routing = session.routing;
+  const memorySearch = session.usage?.agentic?.memorySearch;
+  const delegation = session.usage?.agentic?.delegation;
+
+  if (!routing && !memorySearch && !delegation) {
+    return html`
+      <div class="context-details-panel">
+        <div class="card-title" style="font-size: 12px; color: var(--text);">RAG and Delegation</div>
+        <div class="muted" style="padding: 8px 0;">No staged retrieval or delegation signals captured for this session.</div>
+      </div>
+    `;
+  }
+
+  return html`
+    <div class="context-details-panel">
+      <div class="card-title" style="font-size: 12px; color: var(--text);">RAG and Delegation</div>
+      <div class="context-breakdown-grid">
+        ${routing
+          ? html`
+              <div class="context-breakdown-card">
+                <div class="context-breakdown-title">Routing</div>
+                <div class="context-breakdown-list">
+                  <div class="context-breakdown-item"><span>Phase</span><span class="mono">${routing.phase ?? "synthesis"}</span></div>
+                  <div class="context-breakdown-item"><span>Path</span><span>${routing.cheapPath ? "cheap" : "primary"}</span></div>
+                  <div class="context-breakdown-item"><span>Escalated</span><span>${routing.escalated ? "yes" : "no"}</span></div>
+                  <div class="context-breakdown-item"><span>Confidence</span><span>${formatConfidenceScore(routing.evidenceConfidence)}</span></div>
+                  <div class="context-breakdown-item"><span>Cheap Pass</span><span>${routing.cheapPassIndex ?? "-"}</span></div>
+                </div>
+              </div>
+            `
+          : nothing}
+        ${memorySearch
+          ? html`
+              <div class="context-breakdown-card">
+                <div class="context-breakdown-title">Retrieval</div>
+                <div class="context-breakdown-list">
+                  <div class="context-breakdown-item"><span>Calls</span><span>${memorySearch.calls}</span></div>
+                  <div class="context-breakdown-item"><span>Intent</span><span>${memorySearch.lastIntent ?? "-"}</span></div>
+                  <div class="context-breakdown-item"><span>Strategy</span><span>${memorySearch.lastStrategy ?? "-"}</span></div>
+                  <div class="context-breakdown-item"><span>Source Bias</span><span>${memorySearch.lastSourceBias ?? "-"}</span></div>
+                  <div class="context-breakdown-item"><span>Confidence</span><span>${formatConfidenceScore(memorySearch.lastConfidenceScore)}${memorySearch.lastConfidenceLevel ? ` (${memorySearch.lastConfidenceLevel})` : ""}</span></div>
+                  <div class="context-breakdown-item"><span>Working Set</span><span>${memorySearch.workingSetEnabled ? `on | ${memorySearch.lastWorkingSetHits ?? 0} latest | ${memorySearch.workingSetHits} total` : "off"}</span></div>
+                  <div class="context-breakdown-item"><span>Provider</span><span class="mono">${memorySearch.lastProvider ?? "-"}${memorySearch.lastModel ? `/${memorySearch.lastModel}` : ""}</span></div>
+                </div>
+              </div>
+            `
+          : nothing}
+        ${delegation
+          ? html`
+              <div class="context-breakdown-card">
+                <div class="context-breakdown-title">Delegation</div>
+                <div class="context-breakdown-list">
+                  <div class="context-breakdown-item"><span>Spawns</span><span>${delegation.spawnCalls}</span></div>
+                  <div class="context-breakdown-item"><span>Accepted</span><span>${delegation.accepted}</span></div>
+                  <div class="context-breakdown-item"><span>Structured</span><span>${delegation.structuredResponses}</span></div>
+                  <div class="context-breakdown-item"><span>Read-only</span><span>${delegation.readOnlySpawns}</span></div>
+                  <div class="context-breakdown-item"><span>Roles</span><span>${joinCompactList(delegation.roles.map((role) => `${role.role} x${role.count}`), 2)}</span></div>
+                  <div class="context-breakdown-item"><span>Models</span><span class="mono">${joinCompactList(delegation.modelsApplied, 2)}</span></div>
+                </div>
+              </div>
+            `
+          : nothing}
+      </div>
+    </div>
+  `;
+}
 function renderContextPanel(
   contextWeight: UsageSessionEntry["contextWeight"],
   usage: UsageSessionEntry["usage"],

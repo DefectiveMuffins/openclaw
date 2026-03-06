@@ -6,6 +6,8 @@ export type ExecToolDefaults = {
   host?: ExecHost;
   security?: ExecSecurity;
   ask?: ExecAsk;
+  blockDestructive?: boolean;
+  destructiveMode?: "block" | "approve";
   node?: string;
   pathPrepend?: string[];
   safeBins?: string[];

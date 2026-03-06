@@ -105,4 +105,36 @@ describe("wrapToolWorkspaceRootGuardWithOptions", () => {
       root,
     });
   });
+
+  it("enforces denyPaths after workspace mapping", async () => {
+    const { tool } = createToolHarness();
+    const wrapped = wrapToolWorkspaceRootGuardWithOptions(tool, root, {
+      containerWorkdir: "/workspace",
+      fsPolicy: {
+        workspaceOnly: true,
+        denyPaths: ["docs/"],
+      },
+      operation: "read",
+    });
+
+    await expect(wrapped.execute("tc-deny", { path: "/workspace/docs/readme.md" })).rejects.toThrow(
+      /Filesystem access denied: path denied by tools\.fs\.denyPaths: docs\//,
+    );
+  });
+
+  it("enforces readOnlyPaths for write operations", async () => {
+    const { tool } = createToolHarness();
+    const wrapped = wrapToolWorkspaceRootGuardWithOptions(tool, root, {
+      fsPolicy: {
+        workspaceOnly: false,
+        readOnlyPaths: ["AGENTS.md"],
+      },
+      operation: "write",
+      enforceWorkspaceRoot: false,
+    });
+
+    await expect(wrapped.execute("tc-readonly", { path: path.resolve(root, "AGENTS.md") })).rejects.toThrow(
+      /Filesystem access denied: path is read-only via tools\.fs\.readOnlyPaths: AGENTS\.md/,
+    );
+  });
 });

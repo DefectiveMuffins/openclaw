@@ -83,6 +83,7 @@ export function buildEmbeddedExtensionFactories(params: {
       contextWindowTokens: contextWindowInfo.tokens,
       identifierPolicy: compactionCfg?.identifierPolicy,
       identifierInstructions: compactionCfg?.identifierInstructions,
+      pruningStrategy: compactionCfg?.pruningStrategy,
       model: params.model,
     });
     factories.push(compactionSafeguardExtension);

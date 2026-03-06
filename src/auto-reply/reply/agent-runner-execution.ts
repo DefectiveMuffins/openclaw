@@ -2,6 +2,10 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import { runCliAgent } from "../../agents/cli-runner.js";
 import { getCliSessionId } from "../../agents/cli-session.js";
+import {
+  getDelegationTracking,
+  shouldForceTopLevelDelegation,
+} from "../../agents/delegation-enforcement.js";
 import { runWithModelFallback } from "../../agents/model-fallback.js";
 import { isCliProvider } from "../../agents/model-selection.js";
 import {
@@ -167,7 +171,24 @@ export async function runAgentTurnWithFallback(params: {
         }
         return { text: sanitized, skip: false };
       };
+      const delegationVisibilityRequired = shouldForceTopLevelDelegation(
+        params.followupRun.run.sessionKey,
+      );
+      const canEmitAssistantOutput = () => {
+        if (!delegationVisibilityRequired) {
+          return true;
+        }
+        return (
+          getDelegationTracking({
+            sessionKey: params.followupRun.run.sessionKey,
+            sessionId: params.followupRun.run.sessionId,
+          }).spawnedSubagentCount > 0
+        );
+      };
       const handlePartialForTyping = async (payload: ReplyPayload): Promise<string | undefined> => {
+        if (!canEmitAssistantOutput()) {
+          return undefined;
+        }
         if (isSilentReplyPrefixText(payload.text, SILENT_REPLY_TOKEN)) {
           return undefined;
         }
@@ -331,12 +352,18 @@ export async function runAgentTurnWithFallback(params: {
               });
             },
             onAssistantMessageStart: async () => {
+              if (!canEmitAssistantOutput()) {
+                return;
+              }
               await params.typingSignals.signalMessageStart();
               await params.opts?.onAssistantMessageStart?.();
             },
             onReasoningStream:
               params.typingSignals.shouldStartOnReasoning || params.opts?.onReasoningStream
                 ? async (payload) => {
+                    if (!canEmitAssistantOutput()) {
+                      return;
+                    }
                     await params.typingSignals.signalReasoningDelta();
                     await params.opts?.onReasoningStream?.({
                       text: payload.text,
@@ -374,21 +401,32 @@ export async function runAgentTurnWithFallback(params: {
             // even when regular block streaming is disabled. The handler sends directly
             // via opts.onBlockReply when the pipeline isn't available.
             onBlockReply: params.opts?.onBlockReply
-              ? createBlockReplyDeliveryHandler({
-                  onBlockReply: params.opts.onBlockReply,
-                  currentMessageId:
-                    params.sessionCtx.MessageSidFull ?? params.sessionCtx.MessageSid,
-                  normalizeStreamingText,
-                  applyReplyToMode: params.applyReplyToMode,
-                  typingSignals: params.typingSignals,
-                  blockStreamingEnabled: params.blockStreamingEnabled,
-                  blockReplyPipeline,
-                  directlySentBlockKeys,
-                })
+              ? (() => {
+                  const deliverBlockReply = createBlockReplyDeliveryHandler({
+                    onBlockReply: params.opts.onBlockReply,
+                    currentMessageId:
+                      params.sessionCtx.MessageSidFull ?? params.sessionCtx.MessageSid,
+                    normalizeStreamingText,
+                    applyReplyToMode: params.applyReplyToMode,
+                    typingSignals: params.typingSignals,
+                    blockStreamingEnabled: params.blockStreamingEnabled,
+                    blockReplyPipeline,
+                    directlySentBlockKeys,
+                  });
+                  return async (payload: ReplyPayload) => {
+                    if (!canEmitAssistantOutput()) {
+                      return;
+                    }
+                    await deliverBlockReply(payload);
+                  };
+                })()
               : undefined,
             onBlockReplyFlush:
               params.blockStreamingEnabled && blockReplyPipeline
                 ? async () => {
+                    if (!canEmitAssistantOutput()) {
+                      return;
+                    }
                     await blockReplyPipeline.flush({ force: true });
                   }
                 : undefined,
@@ -613,3 +651,4 @@ export async function runAgentTurnWithFallback(params: {
     directlySentBlockKeys: directlySentBlockKeys.size > 0 ? directlySentBlockKeys : undefined,
   };
 }
+

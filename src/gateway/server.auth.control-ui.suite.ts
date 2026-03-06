@@ -153,6 +153,23 @@ export function registerControlUiAndPairingSuite(): void {
     restoreGatewayToken(prevToken);
   });
 
+  test("allows direct local-network control ui without token or device identity", async () => {
+    testState.gatewayControlUi = undefined;
+    const { server, ws, prevToken } = await startServerWithClient("secret", {
+      wsHeaders: { origin: "http://127.0.0.1" },
+    });
+    const res = await connectReq(ws, {
+      skipDefaultAuth: true,
+      device: null,
+      client: { ...CONTROL_UI_CLIENT },
+    });
+    expect(res.ok).toBe(true);
+    await expectStatusAndHealthOk(ws);
+    ws.close();
+    await server.close();
+    restoreGatewayToken(prevToken);
+  });
+
   test("allows control ui password-only auth on localhost when insecure auth is enabled", async () => {
     testState.gatewayControlUi = { allowInsecureAuth: true };
     testState.gatewayAuth = { mode: "password", password: "secret" };

@@ -14,6 +14,24 @@ import {
   TypingModeSchema,
 } from "./zod-schema.core.js";
 
+const ModelRoutingSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    plannerModel: z.string().optional(),
+    retrievalModel: z.string().optional(),
+    compressionModel: z.string().optional(),
+    verificationModel: z.string().optional(),
+    escalation: z
+      .object({
+        minConfidence: z.number().min(0).max(1).optional(),
+        maxCheapPasses: z.number().int().nonnegative().optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict()
+  .optional();
+
 export const AgentDefaultsSchema = z
   .object({
     model: AgentModelSchema.optional(),
@@ -48,6 +66,13 @@ export const AgentDefaultsSchema = z
     contextTokens: z.number().int().positive().optional(),
     cliBackends: z.record(z.string(), CliBackendSchema).optional(),
     memorySearch: MemorySearchSchema,
+    modelRouting: ModelRoutingSchema,
+    skills: z
+      .object({
+        promptMode: z.union([z.literal("full"), z.literal("compact")]).optional(),
+      })
+      .strict()
+      .optional(),
     contextPruning: z
       .object({
         mode: z.union([z.literal("off"), z.literal("cache-ttl")]).optional(),
@@ -91,6 +116,7 @@ export const AgentDefaultsSchema = z
         identifierPolicy: z
           .union([z.literal("strict"), z.literal("off"), z.literal("custom")])
           .optional(),
+        pruningStrategy: z.union([z.literal("recency"), z.literal("relevance")]).optional(),
         identifierInstructions: z.string().optional(),
         memoryFlush: z
           .object({
@@ -106,6 +132,8 @@ export const AgentDefaultsSchema = z
               .optional(),
             prompt: z.string().optional(),
             systemPrompt: z.string().optional(),
+            periodicTurnInterval: z.number().int().nonnegative().optional(),
+            periodicMinutes: z.number().int().nonnegative().optional(),
           })
           .strict()
           .optional(),
@@ -170,9 +198,25 @@ export const AgentDefaultsSchema = z
           ),
         archiveAfterMinutes: z.number().int().positive().optional(),
         model: AgentModelSchema.optional(),
+        autoTier: z.boolean().optional(),
+        simpleTaskModel: z.string().optional(),
         thinking: z.string().optional(),
         runTimeoutSeconds: z.number().int().min(0).optional(),
         announceTimeoutMs: z.number().int().positive().optional(),
+        delegation: z
+          .object({
+            enabled: z.boolean().optional(),
+            structuredResults: z.boolean().optional(),
+            parallelResearch: z
+              .object({
+                enabled: z.boolean().optional(),
+                maxConcurrent: z.number().int().positive().optional(),
+              })
+              .strict()
+              .optional(),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),
@@ -180,3 +224,6 @@ export const AgentDefaultsSchema = z
   })
   .strict()
   .optional();
+
+
+

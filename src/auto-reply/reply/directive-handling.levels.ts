@@ -1,4 +1,10 @@
-import type { ElevatedLevel, ReasoningLevel, ThinkLevel, VerboseLevel } from "../thinking.js";
+import {
+  resolveAdaptiveThinkLevel,
+  type ElevatedLevel,
+  type ReasoningLevel,
+  type ThinkLevel,
+  type VerboseLevel,
+} from "../thinking.js";
 
 export async function resolveCurrentDirectiveLevels(params: {
   sessionEntry?: {
@@ -13,6 +19,8 @@ export async function resolveCurrentDirectiveLevels(params: {
     elevatedDefault?: unknown;
   };
   resolveDefaultThinkingLevel: () => Promise<ThinkLevel | undefined>;
+  messageText?: string;
+  recentHistory?: string[];
 }): Promise<{
   currentThinkLevel: ThinkLevel | undefined;
   currentVerboseLevel: VerboseLevel | undefined;
@@ -23,7 +31,10 @@ export async function resolveCurrentDirectiveLevels(params: {
     (params.sessionEntry?.thinkingLevel as ThinkLevel | undefined) ??
     (await params.resolveDefaultThinkingLevel()) ??
     (params.agentCfg?.thinkingDefault as ThinkLevel | undefined);
-  const currentThinkLevel = resolvedDefaultThinkLevel;
+  const currentThinkLevel =
+    resolvedDefaultThinkLevel === "adaptive"
+      ? resolveAdaptiveThinkLevel(params.messageText ?? "", params.recentHistory ?? [])
+      : resolvedDefaultThinkLevel;
   const currentVerboseLevel =
     (params.sessionEntry?.verboseLevel as VerboseLevel | undefined) ??
     (params.agentCfg?.verboseDefault as VerboseLevel | undefined);
@@ -39,3 +50,4 @@ export async function resolveCurrentDirectiveLevels(params: {
     currentElevatedLevel,
   };
 }
+

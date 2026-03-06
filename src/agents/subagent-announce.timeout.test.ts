@@ -39,6 +39,22 @@ vi.mock("../config/sessions.js", () => ({
   resolveAgentIdFromSessionKey: () => "main",
   resolveStorePath: () => "/tmp/sessions-main.json",
   resolveMainSessionKey: () => "agent:main:main",
+  updateSessionStoreEntry: vi.fn(async (params: {
+    sessionKey: string;
+    update: (entry: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
+  }) => {
+    const existing = sessionStore[params.sessionKey];
+    if (!existing) {
+      return null;
+    }
+    const patch = await params.update(existing);
+    if (!patch) {
+      return existing;
+    }
+    const next = { ...existing, ...patch };
+    sessionStore[params.sessionKey] = next;
+    return next;
+  }),
 }));
 
 vi.mock("./subagent-depth.js", () => ({
@@ -110,7 +126,10 @@ function findGatewayCall(predicate: (call: GatewayCall) => boolean): GatewayCall
 describe("subagent announce timeout config", () => {
   beforeEach(() => {
     gatewayCalls.length = 0;
-    sessionStore = {};
+    sessionStore = {
+      "agent:main:main": { sessionId: "main-session", updatedAt: Date.now() },
+      "agent:main:subagent:worker": { sessionId: "worker-session", updatedAt: Date.now() },
+    };
     configOverride = {
       session: defaultSessionConfig,
     };
@@ -147,5 +166,17 @@ describe("subagent announce timeout config", () => {
 
     const sendCall = findGatewayCall((call) => call.method === "send");
     expect(sendCall?.timeoutMs).toBe(90_000);
+  });
+
+  it("dedupes delegation metrics when the same announce is processed twice", async () => {
+    await runAnnounceFlowForTest("run-dedupe");
+    await runAnnounceFlowForTest("run-dedupe");
+
+    expect(sessionStore["agent:main:main"]?.agenticCounters).toMatchObject({
+      delegationReports: 1,
+    });
+    expect(sessionStore["agent:main:main"]?.agenticDedupe).toMatchObject({
+      delegationReportIds: ["v1:agent:main:subagent:worker:run-dedupe"],
+    });
   });
 });

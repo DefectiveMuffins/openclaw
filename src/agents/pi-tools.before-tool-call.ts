@@ -1,15 +1,29 @@
-import type { ToolLoopDetectionConfig } from "../config/types.tools.js";
+import type { ToolLoopDetectionConfig, ToolResultCacheConfig } from "../config/types.tools.js";
+import type { ToolWorkingSetConfig } from "./tool-working-set.js";
 import type { SessionState } from "../logging/diagnostic-session-state.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import { isPlainObject } from "../utils.js";
+import {
+  isAcceptedSubagentSpawnResult,
+  recordDelegatedSubagentSpawn,
+} from "./delegation-enforcement.js";
 import { normalizeToolName } from "./tool-policy.js";
+import {
+  getCachedToolResult,
+  invalidateToolResultCache,
+  isToolResultCacheInvalidationTool,
+  setCachedToolResult,
+} from "./tool-result-cache.js";
+import { addToolResultToWorkingSet, invalidateWorkingSet } from "./tool-working-set.js";
 import type { AnyAgentTool } from "./tools/common.js";
 
 export type HookContext = {
   agentId?: string;
   sessionKey?: string;
   loopDetection?: ToolLoopDetectionConfig;
+  toolResultCache?: ToolResultCacheConfig;
+  workingSet?: ToolWorkingSetConfig;
 };
 
 type HookOutcome = { blocked: true; reason: string } | { blocked: false; params: unknown };
@@ -21,6 +35,43 @@ const MAX_TRACKED_ADJUSTED_PARAMS = 1024;
 const LOOP_WARNING_BUCKET_SIZE = 10;
 const MAX_LOOP_WARNING_KEYS = 256;
 
+function getSessionsSpawnRuntime(params: unknown): "subagent" | "acp" {
+  if (!isPlainObject(params)) {
+    return "subagent";
+  }
+  return params.runtime === "acp" ? "acp" : "subagent";
+}
+
+function maybeRecordDelegatedSpawn(args: {
+  ctx?: HookContext;
+  toolName: string;
+  toolParams: unknown;
+  result: unknown;
+}): void {
+  if (!args.ctx?.sessionKey) {
+    return;
+  }
+  if (args.toolName !== "sessions_spawn") {
+    return;
+  }
+  if (getSessionsSpawnRuntime(args.toolParams) !== "subagent") {
+    return;
+  }
+  const resultDetails =
+    isPlainObject(args.result) && "details" in args.result
+      ? (args.result as { details?: unknown }).details
+      : args.result;
+  if (!isAcceptedSubagentSpawnResult(resultDetails)) {
+    return;
+  }
+  recordDelegatedSubagentSpawn(
+    {
+      sessionKey: args.ctx.sessionKey,
+      sessionId: args.ctx.agentId,
+    },
+    resultDetails.childSessionKey,
+  );
+}
 function shouldEmitLoopWarning(state: SessionState, warningKey: string, count: number): boolean {
   if (!state.toolLoopWarningBuckets) {
     state.toolLoopWarningBuckets = new Map();
@@ -183,7 +234,12 @@ export function wrapToolWithBeforeToolCallHook(
   const toolName = tool.name || "tool";
   const wrappedTool: AnyAgentTool = {
     ...tool,
-    execute: async (toolCallId, params, signal, onUpdate) => {
+    execute: async (
+      toolCallId,
+      params,
+      signal,
+      onUpdate,
+    ): Promise<Awaited<ReturnType<typeof execute>>> => {
       const outcome = await runBeforeToolCallHook({
         toolName,
         params,
@@ -202,9 +258,53 @@ export function wrapToolWithBeforeToolCallHook(
           }
         }
       }
+
       const normalizedToolName = normalizeToolName(toolName || "tool");
+
+      if (ctx?.sessionKey && isToolResultCacheInvalidationTool(normalizedToolName)) {
+        invalidateToolResultCache(ctx.sessionKey);
+        invalidateWorkingSet(ctx.sessionKey);
+      }
+
+      const cachedResult = getCachedToolResult({
+        sessionKey: ctx?.sessionKey,
+        toolName: normalizedToolName,
+        toolParams: outcome.params,
+        config: ctx?.toolResultCache,
+      });
+      if (cachedResult.hit) {
+        await recordLoopOutcome({
+          ctx,
+          toolName: normalizedToolName,
+          toolParams: outcome.params,
+          toolCallId,
+          result: cachedResult.result,
+        });
+        return cachedResult.result as Awaited<ReturnType<typeof execute>>;
+      }
+
       try {
         const result = await execute(toolCallId, outcome.params, signal, onUpdate);
+        maybeRecordDelegatedSpawn({
+          ctx,
+          toolName: normalizedToolName,
+          toolParams: outcome.params,
+          result,
+        });
+        setCachedToolResult({
+          sessionKey: ctx?.sessionKey,
+          toolName: normalizedToolName,
+          toolParams: outcome.params,
+          result,
+          config: ctx?.toolResultCache,
+        });
+        addToolResultToWorkingSet({
+          sessionKey: ctx?.sessionKey,
+          toolName: normalizedToolName,
+          toolParams: outcome.params,
+          result,
+          config: ctx?.workingSet,
+        });
         await recordLoopOutcome({
           ctx,
           toolName: normalizedToolName,
@@ -249,3 +349,4 @@ export const __testing = {
   runBeforeToolCallHook,
   isPlainObject,
 };
+

@@ -31,6 +31,18 @@ describe("checkBrowserOrigin", () => {
     expect(result.ok).toBe(true);
   });
 
+  it("accepts same-host private-network origins for direct local-network control ui", () => {
+    const result = checkBrowserOrigin({
+      requestHost: "192.168.1.10:18789",
+      origin: "http://192.168.1.10:18789",
+      isPrivateNetworkClient: true,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.matchedBy).toBe("local-private-network");
+    }
+  });
+
   it("rejects loopback origin mismatches when request is not local", () => {
     const result = checkBrowserOrigin({
       requestHost: "127.0.0.1:18789",

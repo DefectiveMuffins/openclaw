@@ -14,6 +14,7 @@ import {
   resolveConfiguredModelRef,
   resolveThinkingDefault,
   resolveModelRefFromString,
+  resolveSubagentSpawnModelSelection,
 } from "./model-selection.js";
 
 const EXPLICIT_ALLOWLIST_CONFIG = {
@@ -541,6 +542,75 @@ describe("model-selection", () => {
   });
 });
 
+
+describe("resolveSubagentSpawnModelSelection", () => {
+  it("uses simpleTaskModel when autoTier is enabled for simple tasks", () => {
+    const cfg = {
+      agents: {
+        defaults: {
+          model: { primary: "openai/gpt-5.2" },
+          subagents: {
+            autoTier: true,
+            simpleTaskModel: "anthropic/claude-haiku-4-5",
+          },
+        },
+      },
+    } as OpenClawConfig;
+
+    const resolved = resolveSubagentSpawnModelSelection({
+      cfg,
+      agentId: "main",
+      taskDescription: "read file and count lines",
+    });
+
+    expect(resolved).toBe("anthropic/claude-haiku-4-5");
+  });
+
+  it("keeps default model for complex tasks even when autoTier is enabled", () => {
+    const cfg = {
+      agents: {
+        defaults: {
+          model: { primary: "openai/gpt-5.2" },
+          subagents: {
+            autoTier: true,
+            simpleTaskModel: "anthropic/claude-haiku-4-5",
+          },
+        },
+      },
+    } as OpenClawConfig;
+
+    const resolved = resolveSubagentSpawnModelSelection({
+      cfg,
+      agentId: "main",
+      taskDescription: "implement a new caching system",
+    });
+
+    expect(resolved).toBe("openai/gpt-5.2");
+  });
+
+  it("honors explicit model overrides before autoTier", () => {
+    const cfg = {
+      agents: {
+        defaults: {
+          model: { primary: "openai/gpt-5.2" },
+          subagents: {
+            autoTier: true,
+            simpleTaskModel: "anthropic/claude-haiku-4-5",
+          },
+        },
+      },
+    } as OpenClawConfig;
+
+    const resolved = resolveSubagentSpawnModelSelection({
+      cfg,
+      agentId: "main",
+      modelOverride: "openai/gpt-4.1-mini",
+      taskDescription: "read file and count lines",
+    });
+
+    expect(resolved).toBe("openai/gpt-4.1-mini");
+  });
+});
 describe("normalizeModelSelection", () => {
   it("returns trimmed string for string input", () => {
     expect(normalizeModelSelection("ollama/llama3.2:3b")).toBe("ollama/llama3.2:3b");
@@ -568,3 +638,4 @@ describe("normalizeModelSelection", () => {
     expect(normalizeModelSelection(42)).toBeUndefined();
   });
 });
+

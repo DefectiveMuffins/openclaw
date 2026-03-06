@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { handleChatEvent, type ChatEventPayload, type ChatState } from "./chat.ts";
+import { describe, expect, it, vi } from "vitest";
+import {
+  handleChatEvent,
+  loadChatHistory,
+  sendChatMessage,
+  type ChatEventPayload,
+  type ChatState,
+} from "./chat.ts";
 
 function createState(overrides: Partial<ChatState> = {}): ChatState {
   return {
@@ -20,6 +26,83 @@ function createState(overrides: Partial<ChatState> = {}): ChatState {
   };
 }
 
+describe("loadChatHistory", () => {
+  it("ignores stale responses after the session changes", async () => {
+    let resolveRequest: ((value: { messages: unknown[]; thinkingLevel: string }) => void) | null =
+      null;
+    const request = vi.fn().mockImplementation(
+      () =>
+        new Promise<{ messages: unknown[]; thinkingLevel: string }>((resolve) => {
+          resolveRequest = resolve;
+        }),
+    );
+    const state = createState({
+      client: { request } as unknown as ChatState["client"],
+      chatMessages: [
+        { role: "assistant", content: [{ type: "text", text: "keep" }], timestamp: 1 },
+      ],
+    });
+
+    const pending = loadChatHistory(state);
+    state.sessionKey = "other";
+    if (!resolveRequest) {
+      throw new Error("expected loadChatHistory request");
+    }
+    (resolveRequest as (value: { messages: unknown[]; thinkingLevel: string }) => void)({
+      messages: [{ role: "assistant", content: [{ type: "text", text: "stale" }], timestamp: 2 }],
+      thinkingLevel: "low",
+    });
+    await pending;
+
+    expect(state.chatMessages).toEqual([
+      { role: "assistant", content: [{ type: "text", text: "keep" }], timestamp: 1 },
+    ]);
+    expect(state.chatThinkingLevel).toBeNull();
+  });
+});
+describe("sendChatMessage", () => {
+  it("replaces visible history for bare reset commands", async () => {
+    const state = createState({
+      client: {
+        request: vi.fn().mockResolvedValue({ ok: true }),
+      } as unknown as ChatState["client"],
+      chatMessages: [
+        { role: "user", content: [{ type: "text", text: "old" }], timestamp: 1 },
+        { role: "assistant", content: [{ type: "text", text: "reply" }], timestamp: 2 },
+      ],
+    });
+
+    const runId = await sendChatMessage(state, "/new", undefined, {
+      replaceHistory: true,
+      optimisticMessage: null,
+    });
+
+    expect(runId).toBeTruthy();
+    expect(state.chatMessages).toEqual([]);
+    expect(state.chatStream).toBe("");
+    expect(state.chatRunId).toBeTruthy();
+  });
+
+  it("keeps only the post-reset prompt when reset includes new text", async () => {
+    const state = createState({
+      client: {
+        request: vi.fn().mockResolvedValue({ ok: true }),
+      } as unknown as ChatState["client"],
+      chatMessages: [{ role: "user", content: [{ type: "text", text: "old" }], timestamp: 1 }],
+    });
+
+    await sendChatMessage(state, "/reset check status", undefined, {
+      replaceHistory: true,
+      optimisticMessage: "check status",
+    });
+
+    expect(state.chatMessages).toHaveLength(1);
+    expect(state.chatMessages[0]).toMatchObject({
+      role: "user",
+      content: [{ type: "text", text: "check status" }],
+    });
+  });
+});
 describe("handleChatEvent", () => {
   it("returns null when payload is missing", () => {
     const state = createState();

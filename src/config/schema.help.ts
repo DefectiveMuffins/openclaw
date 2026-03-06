@@ -282,6 +282,10 @@ export const FIELD_HELP: Record<string, string> = {
     "Execution security posture selector controlling sandbox/approval expectations for command execution. Keep strict security mode for untrusted prompts and relax only for trusted operator workflows.",
   "tools.exec.ask":
     "Approval strategy for when exec commands require human confirmation before running. Use stricter ask behavior in shared channels and lower-friction settings in private operator contexts.",
+  "tools.exec.blockDestructive":
+    "When true, detect and intercept known destructive shell commands (for example rm -rf, mkfs, git reset --hard) before execution. Keep enabled in shared or semi-trusted environments to reduce accidental destructive actions.",
+  "tools.exec.destructiveMode":
+    'Handling mode for destructive command matches when tools.exec.blockDestructive=true: "block" rejects immediately, while "approve" routes through human approval. Keep "block" as safest default; use "approve" only when operators actively review risky commands.',
   "tools.exec.node":
     "Node binding configuration for exec tooling when command execution is delegated through connected nodes. Use explicit node binding only when multi-node routing is required.",
   "tools.agentToAgent":
@@ -459,7 +463,7 @@ export const FIELD_HELP: Record<string, string> = {
   "tools.exec.applyPatch.allowModels":
     'Optional allowlist of model ids (e.g. "gpt-5.2" or "openai/gpt-5.2").',
   "tools.loopDetection.enabled":
-    "Enable repetitive tool-call loop detection and backoff safety checks (default: false).",
+    "Enable repetitive tool-call loop detection and backoff safety checks (default: true).",
   "tools.loopDetection.historySize": "Tool history window size for loop detection (default: 30).",
   "tools.loopDetection.warningThreshold":
     "Warning threshold for repetitive patterns when detector is enabled (default: 10).",
@@ -472,6 +476,22 @@ export const FIELD_HELP: Record<string, string> = {
   "tools.loopDetection.detectors.knownPollNoProgress":
     "Enable known poll tool no-progress loop detection (default: true).",
   "tools.loopDetection.detectors.pingPong": "Enable ping-pong loop detection (default: true).",
+  "tools.toolResultCache":
+    "Per-session cache settings for repeated read-only tool results. Keep disabled by default and enable when sessions repeatedly read/search identical inputs.",
+  "tools.toolResultCache.enabled":
+    "Enable per-session tool-result caching for selected read-only tools (default: false).",
+  "tools.toolResultCache.ttlMs":
+    "Time-to-live in milliseconds for cached tool results before re-execution is required (default: 30000).",
+  "tools.toolResultCache.maxEntries":
+    "Maximum cached tool results retained per session before least-recently-used eviction (default: 100).",
+  "tools.toolResultCache.cacheableTools":
+    "Optional list of tool names eligible for result caching; when omitted, OpenClaw uses a conservative read-only default list.",
+  "tools.parallelExecution":
+    "Controls optional parallel execution for independent tool calls emitted in the same turn.",
+  "tools.parallelExecution.enabled":
+    "Enable parallel dispatch for eligible tool calls (default: false).",
+  "tools.parallelExecution.maxConcurrent":
+    "Maximum number of tool calls executed concurrently when parallel dispatch is enabled (default: 5).",
   "tools.exec.notifyOnExit":
     "When true (default), backgrounded exec sessions on exit and node exec lifecycle events enqueue a system event and request a heartbeat.",
   "tools.exec.notifyOnExitEmptySuccess":
@@ -589,6 +609,12 @@ export const FIELD_HELP: Record<string, string> = {
     "Optional thread/topic target for channels that support threaded delivery of forwarded approvals. Use this to keep approval traffic contained in operational threads instead of main channels.",
   "tools.fs.workspaceOnly":
     "Restrict filesystem tools (read/write/edit/apply_patch) to the workspace directory (default: false).",
+  "tools.fs.allowPaths":
+    'Optional filesystem allowlist (relative to workspace unless absolute) for read/write/edit/apply_patch paths. When set, paths outside this list are denied. Use this to lock agents to specific folders such as "memory/" and identity files.',
+  "tools.fs.denyPaths":
+    'Optional filesystem denylist (relative to workspace unless absolute) that blocks matching paths even if allowPaths includes them. Use this for high-risk locations like secrets directories or environment files.',
+  "tools.fs.readOnlyPaths":
+    "Optional filesystem read-only paths where reads are allowed but writes/edits are blocked. Use this to protect bootstrap and policy files from accidental modification while keeping them visible for context.",
   "tools.sessions.visibility":
     'Controls which sessions can be targeted by sessions_list/sessions_history/sessions_send. ("tree" default = current session + spawned subagent sessions; "self" = only current; "agent" = any session in the current agent id; "all" = any session; cross-agent still requires tools.agentToAgent).',
   "tools.message.allowCrossContextSend":
@@ -604,10 +630,10 @@ export const FIELD_HELP: Record<string, string> = {
   "tools.message.crossContext.marker.suffix":
     'Text suffix for cross-context markers (supports "{channel}").',
   "tools.message.broadcast.enabled": "Enable broadcast action (default: true).",
-  "tools.web.search.enabled": "Enable the web_search tool (requires a provider API key).",
+  "tools.web.search.enabled": "Enable the web_search tool (uses DuckDuckGo fallback when no provider API key is configured).",
   "tools.web.search.provider":
-    'Search provider ("brave", "perplexity", "grok", "gemini", or "kimi"). Auto-detected from available API keys if omitted.',
-  "tools.web.search.apiKey": "Brave Search API key (fallback: BRAVE_API_KEY env var).",
+    'Search provider ("brave", "perplexity", "grok", "gemini", "kimi", or "duckduckgo"). Auto-detected from available API keys, otherwise falls back to DuckDuckGo.',
+  "tools.web.search.apiKey": "Brave Search API key (optional; fallback: BRAVE_API_KEY env var).",
   "tools.web.search.maxResults": "Default number of results to return (1-10).",
   "tools.web.search.timeoutSeconds": "Timeout in seconds for web_search requests.",
   "tools.web.search.cacheTtlMinutes": "Cache TTL in minutes for web_search results.",
@@ -724,6 +750,10 @@ export const FIELD_HELP: Record<string, string> = {
     'Include absolute timestamps in message envelopes ("on" or "off").',
   "agents.defaults.envelopeElapsed": 'Include elapsed time in message envelopes ("on" or "off").',
   "agents.defaults.models": "Configured model catalog (keys are full provider/model IDs).",
+  "agents.defaults.skills":
+    "Agent skills prompt settings controlling how installed skills are represented in the system prompt.",
+  "agents.defaults.skills.promptMode":
+    "Skills prompt verbosity mode: \"full\" includes rich multi-line descriptions, while \"compact\" emits one-line summaries with SKILL.md locations to reduce prompt token usage.",
   "agents.defaults.memorySearch":
     "Vector search over MEMORY.md and memory/*.md (per-agent overrides supported).",
   "agents.defaults.memorySearch.enabled":
@@ -772,6 +802,12 @@ export const FIELD_HELP: Record<string, string> = {
     "Maximum number of memory hits returned from search before downstream reranking and prompt injection. Raise for broader recall, or lower for tighter prompts and faster responses.",
   "agents.defaults.memorySearch.query.minScore":
     "Minimum relevance score threshold for including memory results in final recall output. Increase to reduce weak/noisy matches, or lower when you need more permissive retrieval.",
+  "agents.defaults.memorySearch.query.routing.enabled":
+    "Enables retrieval planning for memory_search so the runtime can choose fast vs deep recall, source bias, and query fan-out automatically. Keep disabled for current behavior; enable when you want better recall on ambiguous or multi-hop prompts.",
+  "agents.defaults.memorySearch.query.routing.maxQueries":
+    "Maximum number of rewritten recall queries issued during deep memory_search planning (default: 3). Raise this cautiously for broader recall, or keep it low to bound latency and embedding cost.",
+  "agents.defaults.memorySearch.query.routing.deepQueryThreshold":
+    "Minimum query length before auto-routing may escalate from fast to deep recall (default: 80). Lower this if short but ambiguous prompts need broader recall, or raise it to keep deep recall rare.",
   "agents.defaults.memorySearch.query.hybrid.enabled":
     "Combines BM25 keyword matching with vector similarity for better recall on mixed exact + semantic queries. Keep enabled unless you are isolating ranking behavior for troubleshooting.",
   "agents.defaults.memorySearch.query.hybrid.vectorWeight":
@@ -851,6 +887,32 @@ export const FIELD_HELP: Record<string, string> = {
     "Defines which sessions/channels are eligible for QMD recall using session.sendPolicy-style rules. Keep default direct-only scope unless you intentionally want cross-chat memory sharing.",
   "agents.defaults.memorySearch.cache.maxEntries":
     "Sets a best-effort upper bound on cached embeddings kept in SQLite for memory search. Use this when controlling disk growth matters more than peak reindex speed.",
+  "agents.defaults.memorySearch.workingSet":
+    "Transient in-session recall index built from recent read/search/web tool outputs and structured subagent reports. Enable this when active-task evidence should be reusable without re-reading files or repeating searches.",
+  "agents.defaults.memorySearch.workingSet.enabled":
+    "Enables the transient working-set memory layer for current-session evidence reuse (default: false). Keep this off for current behavior, or enable it to reduce repeated reads and improve small-model continuity.",
+  "agents.defaults.memorySearch.workingSet.sources":
+    'Chooses which transient evidence feeds the working-set index: "toolResults", "subagentReports", or both. Keep both unless you want to isolate recall to one evidence source.',
+  "agents.defaults.memorySearch.workingSet.ttlMs":
+    "Time-to-live for transient working-set evidence in milliseconds (default: 1800000). Lower this for fresher but narrower recall, or raise it when longer active-task continuity matters more than strict freshness.",
+  "agents.defaults.memorySearch.workingSet.maxEntries":
+    "Maximum number of transient working-set entries retained per session (default: 200). Lower this to bound storage and rerank cost, or raise it for broader active-task recall.",
+  "agents.defaults.modelRouting":
+    "Stage-aware model routing settings for planner, retrieval, compression, and verification passes. Enable this when you want smaller models to handle cheap intermediate work before escalating to the main synthesis path.",
+  "agents.defaults.modelRouting.enabled":
+    "Enables stage-aware routing to cheaper models for planner/retrieval/compression/verification phases (default: false). Keep disabled for current model behavior, or enable it to reduce cost on intermediate reasoning steps.",
+  "agents.defaults.modelRouting.plannerModel":
+    "Optional cheap model override for planner/classification passes that decide retrieval and delegation strategy. Use a fast, inexpensive model here because these passes should be short and bounded.",
+  "agents.defaults.modelRouting.retrievalModel":
+    "Optional cheap model override for retrieval planning and evidence shaping passes. Use this when memory_search planning or recall compression should stay off the main model path.",
+  "agents.defaults.modelRouting.compressionModel":
+    "Optional cheap model override for evidence and subagent-output compression before final synthesis. Use a small model that is good at concise, structured summarization.",
+  "agents.defaults.modelRouting.verificationModel":
+    "Optional cheap model override for disagreement or low-confidence verification passes before escalation. Use this to cheaply sanity-check merged evidence before invoking a larger model.",
+  "agents.defaults.modelRouting.escalation.minConfidence":
+    "Minimum evidence confidence required to stay on the cheap routing path before escalating to the primary synthesis model (default: 0.65). Lower it for more aggressive cost savings, or raise it for safer escalation behavior.",
+  "agents.defaults.modelRouting.escalation.maxCheapPasses":
+    "Maximum number of cheap intermediate passes allowed before forced escalation to the main path (default: 2). Keep this low to avoid loops and latency creep in staged routing.",
   "agents.defaults.memorySearch.sync.onSessionStart":
     "Triggers a memory index sync when a session starts so early turns see fresh memory content. Keep enabled when startup freshness matters more than initial turn latency.",
   "agents.defaults.memorySearch.sync.onSearch":
@@ -950,6 +1012,8 @@ export const FIELD_HELP: Record<string, string> = {
     "Maximum fraction of total context budget allowed for retained history after compaction (range 0.1-0.9). Use lower shares for more generation headroom or higher shares for deeper historical continuity.",
   "agents.defaults.compaction.identifierPolicy":
     'Identifier-preservation policy for compaction summaries: "strict" prepends built-in opaque-identifier retention guidance (default), "off" disables this prefix, and "custom" uses identifierInstructions. Keep "strict" unless you have a specific compatibility need.',
+  "agents.defaults.compaction.pruningStrategy":
+    'History pruning strategy under compaction pressure: "recency" drops oldest chunks first, while "relevance" preserves identifier-related context when possible (default: "recency").',
   "agents.defaults.compaction.identifierInstructions":
     'Custom identifier-preservation instruction text used when identifierPolicy="custom". Keep this explicit and safety-focused so compaction summaries do not rewrite opaque IDs, URLs, hosts, or ports.',
   "agents.defaults.compaction.memoryFlush":
@@ -964,6 +1028,24 @@ export const FIELD_HELP: Record<string, string> = {
     "User-prompt template used for the pre-compaction memory flush turn when generating memory candidates. Use this only when you need custom extraction instructions beyond the default memory flush behavior.",
   "agents.defaults.compaction.memoryFlush.systemPrompt":
     "System-prompt override for the pre-compaction memory flush turn to control extraction style and safety constraints. Use carefully so custom instructions do not reduce memory quality or leak sensitive context.",
+  "agents.defaults.compaction.memoryFlush.periodicTurnInterval":
+    "Run memory flush every N turns since the last successful flush (0 disables turn-based periodic flush). Use this in long sessions where compaction may not trigger but you still want regular memory persistence.",
+  "agents.defaults.compaction.memoryFlush.periodicMinutes":
+    "Run memory flush every N minutes since the last successful flush (0 disables time-based periodic flush). Use this to enforce regular memory persistence cadence during long-running interactive sessions.",
+  "agents.defaults.subagents.autoTier":
+    "Automatically classify subagent tasks and route clearly simple tasks to simpleTaskModel when enabled (default: false).",
+  "agents.defaults.subagents.simpleTaskModel":
+    "Model ref used for simple subagent tasks when autoTier is enabled.",
+  "agents.defaults.subagents.delegation":
+    "Structured delegation defaults for spawned subagents, including structured result envelopes and bounded parallel research fan-out. Enable this when parent agents should orchestrate smaller workers more deterministically.",
+  "agents.defaults.subagents.delegation.enabled":
+    "Enables delegation-aware spawn defaults such as structured result contracts and bounded research fan-out (default: false). Keep disabled for current freeform subagent behavior, or enable it for more deterministic orchestration.",
+  "agents.defaults.subagents.delegation.structuredResults":
+    "Requires delegation-aware subagents to return structured completion envelopes instead of freeform-only text. Keep enabled when parent agents need compact, mergeable outputs with confidence and evidence fields.",
+  "agents.defaults.subagents.delegation.parallelResearch.enabled":
+    "Allows read-only research and summarize subagents to fan out concurrently when delegation is enabled (default: false). Keep this conservative so mutation-oriented work stays serial unless explicitly widened.",
+  "agents.defaults.subagents.delegation.parallelResearch.maxConcurrent":
+    "Maximum concurrent research fan-out width for delegation-aware subagents (default: 3). Raise this carefully for wider read-only exploration, but keep it bounded to avoid runaway cost and noisy merges.",
   "agents.defaults.embeddedPi":
     "Embedded Pi runner hardening controls for how workspace-local Pi settings are trusted and applied in OpenClaw sessions.",
   "agents.defaults.embeddedPi.projectSettingsPolicy":
@@ -1474,3 +1556,9 @@ export const FIELD_HELP: Record<string, string> = {
   "channels.slack.dmPolicy":
     'Direct message access control ("pairing" recommended). "open" requires channels.slack.allowFrom=["*"].',
 };
+
+
+
+
+
+

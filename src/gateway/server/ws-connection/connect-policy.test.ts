@@ -51,6 +51,7 @@ describe("ws connect policy", () => {
         isControlUi: false,
         controlUiAuthPolicy: policy,
         trustedProxyAuthOk: false,
+        localNetworkBypass: false,
         sharedAuthOk: true,
         authOk: true,
         hasSharedAuth: true,
@@ -71,6 +72,7 @@ describe("ws connect policy", () => {
         isControlUi: true,
         controlUiAuthPolicy: controlUiStrict,
         trustedProxyAuthOk: false,
+        localNetworkBypass: false,
         sharedAuthOk: true,
         authOk: true,
         hasSharedAuth: true,
@@ -86,6 +88,7 @@ describe("ws connect policy", () => {
         isControlUi: true,
         controlUiAuthPolicy: controlUiStrict,
         trustedProxyAuthOk: false,
+        localNetworkBypass: false,
         sharedAuthOk: true,
         authOk: true,
         hasSharedAuth: true,
@@ -106,6 +109,7 @@ describe("ws connect policy", () => {
         isControlUi: true,
         controlUiAuthPolicy: controlUiNoInsecure,
         trustedProxyAuthOk: false,
+        localNetworkBypass: false,
         sharedAuthOk: true,
         authOk: true,
         hasSharedAuth: true,
@@ -120,6 +124,7 @@ describe("ws connect policy", () => {
         isControlUi: false,
         controlUiAuthPolicy: policy,
         trustedProxyAuthOk: false,
+        localNetworkBypass: false,
         sharedAuthOk: true,
         authOk: true,
         hasSharedAuth: true,
@@ -134,6 +139,7 @@ describe("ws connect policy", () => {
         isControlUi: false,
         controlUiAuthPolicy: policy,
         trustedProxyAuthOk: false,
+        localNetworkBypass: false,
         sharedAuthOk: false,
         authOk: false,
         hasSharedAuth: true,
@@ -148,6 +154,7 @@ describe("ws connect policy", () => {
         isControlUi: false,
         controlUiAuthPolicy: policy,
         trustedProxyAuthOk: false,
+        localNetworkBypass: false,
         sharedAuthOk: true,
         authOk: true,
         hasSharedAuth: true,
@@ -163,7 +170,23 @@ describe("ws connect policy", () => {
         isControlUi: true,
         controlUiAuthPolicy: controlUiNoInsecure,
         trustedProxyAuthOk: true,
+        localNetworkBypass: false,
         sharedAuthOk: false,
+        authOk: true,
+        hasSharedAuth: false,
+        isLocalClient: false,
+      }).kind,
+    ).toBe("allow");
+
+    expect(
+      evaluateMissingDeviceIdentity({
+        hasDeviceIdentity: false,
+        role: "operator",
+        isControlUi: true,
+        controlUiAuthPolicy: controlUiNoInsecure,
+        trustedProxyAuthOk: false,
+        localNetworkBypass: true,
+        sharedAuthOk: true,
         authOk: true,
         hasSharedAuth: false,
         isLocalClient: false,
@@ -186,6 +209,7 @@ describe("ws connect policy", () => {
     expect(shouldSkipControlUiPairing(bypass, false, false)).toBe(false);
     expect(shouldSkipControlUiPairing(strict, true, false)).toBe(false);
     expect(shouldSkipControlUiPairing(strict, false, true)).toBe(true);
+    expect(shouldSkipControlUiPairing(strict, false, false, true)).toBe(true);
   });
 
   test("trusted-proxy control-ui bypass only applies to operator + trusted-proxy auth", () => {

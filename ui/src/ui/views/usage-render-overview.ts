@@ -71,9 +71,9 @@ function renderFilterChips(
     selectedSessions.length === 1 ? sessions.find((s) => s.key === selectedSessions[0]) : null;
   const sessionsLabel = selectedSession
     ? (selectedSession.label || selectedSession.key).slice(0, 20) +
-      ((selectedSession.label || selectedSession.key).length > 20 ? "…" : "")
+      ((selectedSession.label || selectedSession.key).length > 20 ? "..." : "")
     : selectedSessions.length === 1
-      ? selectedSessions[0].slice(0, 8) + "…"
+      ? selectedSessions[0].slice(0, 8) + "..."
       : `${selectedSessions.length} sessions`;
   const sessionsFullName = selectedSession
     ? selectedSession.label || selectedSession.key
@@ -92,7 +92,7 @@ function renderFilterChips(
           ? html`
             <div class="filter-chip">
               <span class="filter-chip-label">Days: ${daysLabel}</span>
-              <button class="filter-chip-remove" @click=${onClearDays} title="Remove filter">×</button>
+              <button class="filter-chip-remove" @click=${onClearDays} title="Remove filter">?</button>
             </div>
           `
           : nothing
@@ -102,7 +102,7 @@ function renderFilterChips(
           ? html`
             <div class="filter-chip">
               <span class="filter-chip-label">Hours: ${hoursLabel}</span>
-              <button class="filter-chip-remove" @click=${onClearHours} title="Remove filter">×</button>
+              <button class="filter-chip-remove" @click=${onClearHours} title="Remove filter">?</button>
             </div>
           `
           : nothing
@@ -112,7 +112,7 @@ function renderFilterChips(
           ? html`
             <div class="filter-chip" title="${sessionsFullName}">
               <span class="filter-chip-label">Session: ${sessionsLabel}</span>
-              <button class="filter-chip-remove" @click=${onClearSessions} title="Remove filter">×</button>
+              <button class="filter-chip-remove" @click=${onClearSessions} title="Remove filter">?</button>
             </div>
           `
           : nothing
@@ -364,10 +364,174 @@ function renderPeakErrorList(
   `;
 }
 
+type UsageAgenticAccumulator = {
+  routedRuns: number;
+  cheapPathRuns: number;
+  escalations: number;
+  memorySearchCalls: number;
+  workingSetHitCalls: number;
+  delegationReports: number;
+  structuredDelegationReports: number;
+  delegationConflictSignals: number;
+};
+
+type UsageAgenticBreakdownEntry = UsageAgenticAccumulator & {
+  label: string;
+  cheapPathRate?: number;
+  workingSetHitRate?: number;
+  escalationRate?: number;
+  conflictRate?: number;
+  activityScore: number;
+};
+
+type UsageAgenticOverviewStats = UsageAgenticAccumulator & {
+  byAgent: UsageAgenticBreakdownEntry[];
+  byChannel: UsageAgenticBreakdownEntry[];
+};
+
+function createUsageAgenticAccumulator(): UsageAgenticAccumulator {
+  return {
+    routedRuns: 0,
+    cheapPathRuns: 0,
+    escalations: 0,
+    memorySearchCalls: 0,
+    workingSetHitCalls: 0,
+    delegationReports: 0,
+    structuredDelegationReports: 0,
+    delegationConflictSignals: 0,
+  };
+}
+
+function applySessionToUsageAgenticAccumulator(
+  acc: UsageAgenticAccumulator,
+  session: UsageSessionEntry,
+): void {
+  const counters = session.agenticCounters;
+  const routing = session.routing;
+  const memorySearch = session.usage?.agentic?.memorySearch;
+  const delegation = session.usage?.agentic?.delegation;
+
+  if (counters) {
+    acc.routedRuns += counters.routedRuns ?? 0;
+    acc.cheapPathRuns += counters.cheapPathRuns ?? 0;
+    acc.escalations += counters.escalations ?? 0;
+    acc.delegationReports += counters.delegationReports ?? 0;
+    acc.structuredDelegationReports += counters.structuredDelegationReports ?? 0;
+    acc.delegationConflictSignals += counters.delegationConflictSignals ?? 0;
+  } else if (routing) {
+    acc.routedRuns += 1;
+    acc.cheapPathRuns += routing.cheapPath ? 1 : 0;
+    acc.escalations += routing.escalated ? 1 : 0;
+  }
+
+  if (memorySearch) {
+    acc.memorySearchCalls += memorySearch.calls;
+    acc.workingSetHitCalls +=
+      memorySearch.hitCalls ?? (memorySearch.workingSetHits > 0 ? 1 : 0);
+  }
+
+  if (!counters && delegation) {
+    acc.delegationReports += delegation.accepted || delegation.spawnCalls || 0;
+    acc.structuredDelegationReports += delegation.structuredResponses || 0;
+  }
+}
+
+function buildUsageAgenticBreakdownEntries(
+  buckets: Map<string, UsageAgenticAccumulator>,
+): UsageAgenticBreakdownEntry[] {
+  return Array.from(buckets.entries())
+    .map(([label, acc]) => {
+      const conflictBase = acc.structuredDelegationReports || acc.delegationReports;
+      return {
+        label,
+        ...acc,
+        cheapPathRate: acc.routedRuns > 0 ? acc.cheapPathRuns / acc.routedRuns : undefined,
+        workingSetHitRate:
+          acc.memorySearchCalls > 0 ? acc.workingSetHitCalls / acc.memorySearchCalls : undefined,
+        escalationRate: acc.routedRuns > 0 ? acc.escalations / acc.routedRuns : undefined,
+        conflictRate:
+          conflictBase > 0 ? acc.delegationConflictSignals / conflictBase : undefined,
+        activityScore:
+          acc.routedRuns +
+          acc.memorySearchCalls +
+          acc.delegationReports +
+          acc.delegationConflictSignals,
+      };
+    })
+    .filter((entry) => entry.activityScore > 0)
+    .toSorted((a, b) => b.activityScore - a.activityScore || a.label.localeCompare(b.label));
+}
+
+function buildUsageAgenticOverviewStats(
+  sessions: UsageSessionEntry[],
+): UsageAgenticOverviewStats {
+  const totals = createUsageAgenticAccumulator();
+  const byAgent = new Map<string, UsageAgenticAccumulator>();
+  const byChannel = new Map<string, UsageAgenticAccumulator>();
+
+  for (const session of sessions) {
+    applySessionToUsageAgenticAccumulator(totals, session);
+
+    const agentId = session.agentId?.trim();
+    if (agentId) {
+      const entry = byAgent.get(agentId) ?? createUsageAgenticAccumulator();
+      applySessionToUsageAgenticAccumulator(entry, session);
+      byAgent.set(agentId, entry);
+    }
+
+    const channel = session.channel?.trim();
+    if (channel) {
+      const entry = byChannel.get(channel) ?? createUsageAgenticAccumulator();
+      applySessionToUsageAgenticAccumulator(entry, session);
+      byChannel.set(channel, entry);
+    }
+  }
+
+  return {
+    ...totals,
+    byAgent: buildUsageAgenticBreakdownEntries(byAgent),
+    byChannel: buildUsageAgenticBreakdownEntries(byChannel),
+  };
+}
+
+function formatRateLabel(value: number | undefined): string {
+  if (!(typeof value === "number") || !Number.isFinite(value)) {
+    return "-";
+  }
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function buildUsageAgenticDrilldownItems(
+  entries: UsageAgenticBreakdownEntry[],
+): Array<{ label: string; value: string; sub?: string }> {
+  return entries.slice(0, 5).map((entry) => {
+    const conflictBase = entry.structuredDelegationReports || entry.delegationReports;
+    const parts = [
+      `ws ${formatRateLabel(entry.workingSetHitRate)}`,
+      `esc ${formatRateLabel(entry.escalationRate)}`,
+    ];
+    if (entry.routedRuns > 0) {
+      parts.push(`${entry.routedRuns} routed`);
+    }
+    if (entry.memorySearchCalls > 0) {
+      parts.push(`${entry.memorySearchCalls} recalls`);
+    }
+    if (conflictBase > 0) {
+      parts.push(`${entry.delegationConflictSignals}/${conflictBase} conflicts`);
+    }
+    return {
+      label: entry.label,
+      value: `cheap ${formatRateLabel(entry.cheapPathRate)}`,
+      sub: parts.join(" | "),
+    };
+  });
+}
+
 function renderUsageInsights(
   totals: UsageTotals | null,
   aggregates: UsageAggregates,
   stats: UsageInsightStats,
+  agenticStats: UsageAgenticOverviewStats,
   showCostHint: boolean,
   errorHours: Array<{ label: string; value: string; sub?: string }>,
   sessionCount: number,
@@ -383,24 +547,71 @@ function renderUsageInsights(
   const avgCost = aggregates.messages.total ? totals.totalCost / aggregates.messages.total : 0;
   const cacheBase = totals.input + totals.cacheRead;
   const cacheHitRate = cacheBase > 0 ? totals.cacheRead / cacheBase : 0;
-  const cacheHitLabel = cacheBase > 0 ? `${(cacheHitRate * 100).toFixed(1)}%` : "—";
+  const cacheHitLabel = cacheBase > 0 ? `${(cacheHitRate * 100).toFixed(1)}%` : "?";
   const errorRatePct = stats.errorRate * 100;
   const throughputLabel =
     stats.throughputTokensPerMin !== undefined
       ? `${formatTokens(Math.round(stats.throughputTokensPerMin))} tok/min`
-      : "—";
+      : "?";
   const throughputCostLabel =
     stats.throughputCostPerMin !== undefined
       ? `${formatCost(stats.throughputCostPerMin, 4)} / min`
-      : "—";
+      : "?";
   const avgDurationLabel =
     stats.durationCount > 0
-      ? (formatDurationCompact(stats.avgDurationMs, { spaced: true }) ?? "—")
-      : "—";
+      ? (formatDurationCompact(stats.avgDurationMs, { spaced: true }) ?? "?")
+      : "?";
   const cacheHint = "Cache hit rate = cache read / (input + cache read). Higher is better.";
   const errorHint = "Error rate = errors / total messages. Lower is better.";
   const throughputHint = "Throughput shows tokens per minute over active time. Higher is better.";
   const tokensHint = "Average tokens per message in this range.";
+  const cheapPathRate =
+    agenticStats.routedRuns > 0
+      ? agenticStats.cheapPathRuns / agenticStats.routedRuns
+      : undefined;
+  const workingSetHitRate =
+    agenticStats.memorySearchCalls > 0
+      ? agenticStats.workingSetHitCalls / agenticStats.memorySearchCalls
+      : undefined;
+  const escalationRate =
+    agenticStats.routedRuns > 0
+      ? agenticStats.escalations / agenticStats.routedRuns
+      : undefined;
+  const conflictBase =
+    agenticStats.structuredDelegationReports || agenticStats.delegationReports;
+  const conflictRate = conflictBase > 0
+    ? agenticStats.delegationConflictSignals / conflictBase
+    : undefined;
+  const cheapPathHint = "Cheap path rate = runs kept on planner/retrieval/compression cheap models / routed runs.";
+  const workingSetHint = "Working-set hit rate = memory searches with at least one working-set hit / total memory searches.";
+  const escalationHint = "Escalation rate = routed runs that promoted back to the primary synthesis model path.";
+  const conflictHint = "Conflict signals count structured delegation reports that mention disagreement, contradiction, or inconsistency.";
+  const cheapPathClass =
+    cheapPathRate === undefined ? "" : cheapPathRate >= 0.5 ? "good" : cheapPathRate > 0 ? "warn" : "";
+  const workingSetClass =
+    workingSetHitRate === undefined
+      ? ""
+      : workingSetHitRate >= 0.5
+        ? "good"
+        : workingSetHitRate >= 0.2
+          ? "warn"
+          : "bad";
+  const escalationClass =
+    escalationRate === undefined
+      ? ""
+      : escalationRate <= 0.1
+        ? "good"
+        : escalationRate <= 0.3
+          ? "warn"
+          : "bad";
+  const conflictClass =
+    conflictRate === undefined
+      ? ""
+      : conflictRate === 0
+        ? "good"
+        : conflictRate <= 0.1
+          ? "warn"
+          : "bad";
   const costHint = showCostHint
     ? "Average cost per message when providers report costs. Cost data is missing for some or all sessions in this range."
     : "Average cost per message when providers report costs.";
@@ -412,7 +623,7 @@ function renderUsageInsights(
       return {
         label: formatDayLabel(day.date),
         value: `${(rate * 100).toFixed(2)}%`,
-        sub: `${day.errors} errors · ${day.messages} msgs · ${formatTokens(day.tokens)}`,
+        sub: `${day.errors} errors ? ${day.messages} msgs ? ${formatTokens(day.tokens)}`,
         rate,
       };
     })
@@ -423,12 +634,12 @@ function renderUsageInsights(
   const topModels = aggregates.byModel.slice(0, 5).map((entry) => ({
     label: entry.model ?? "unknown",
     value: formatCost(entry.totals.totalCost),
-    sub: `${formatTokens(entry.totals.totalTokens)} · ${entry.count} msgs`,
+    sub: `${formatTokens(entry.totals.totalTokens)} ? ${entry.count} msgs`,
   }));
   const topProviders = aggregates.byProvider.slice(0, 5).map((entry) => ({
     label: entry.provider ?? "unknown",
     value: formatCost(entry.totals.totalCost),
-    sub: `${formatTokens(entry.totals.totalTokens)} · ${entry.count} msgs`,
+    sub: `${formatTokens(entry.totals.totalTokens)} ? ${entry.count} msgs`,
   }));
   const topTools = aggregates.tools.tools.slice(0, 6).map((tool) => ({
     label: tool.name,
@@ -445,6 +656,8 @@ function renderUsageInsights(
     value: formatCost(entry.totals.totalCost),
     sub: formatTokens(entry.totals.totalTokens),
   }));
+  const agenticByAgent = buildUsageAgenticDrilldownItems(agenticStats.byAgent);
+  const agenticByChannel = buildUsageAgenticDrilldownItems(agenticStats.byChannel);
 
   return html`
     <section class="card" style="margin-top: 16px;">
@@ -457,7 +670,7 @@ function renderUsageInsights(
           </div>
           <div class="usage-summary-value">${aggregates.messages.total}</div>
           <div class="usage-summary-sub">
-            ${aggregates.messages.user} user · ${aggregates.messages.assistant} assistant
+            ${aggregates.messages.user} user ? ${aggregates.messages.assistant} assistant
           </div>
         </div>
         <div class="usage-summary-card">
@@ -515,7 +728,7 @@ function renderUsageInsights(
           </div>
           <div class="usage-summary-value ${errorRatePct > 5 ? "bad" : errorRatePct > 1 ? "warn" : "good"}">${errorRatePct.toFixed(2)}%</div>
           <div class="usage-summary-sub">
-            ${aggregates.messages.errors} errors · ${avgDurationLabel} avg session
+            ${aggregates.messages.errors} errors ? ${avgDurationLabel} avg session
           </div>
         </div>
         <div class="usage-summary-card">
@@ -525,7 +738,47 @@ function renderUsageInsights(
           </div>
           <div class="usage-summary-value ${cacheHitRate > 0.6 ? "good" : cacheHitRate > 0.3 ? "warn" : "bad"}">${cacheHitLabel}</div>
           <div class="usage-summary-sub">
-            ${formatTokens(totals.cacheRead)} cached · ${formatTokens(cacheBase)} prompt
+            ${formatTokens(totals.cacheRead)} cached ? ${formatTokens(cacheBase)} prompt
+          </div>
+        </div>
+        <div class="usage-summary-card">
+          <div class="usage-summary-title">
+            Cheap Path Rate
+            <span class="usage-summary-hint" title=${cheapPathHint}>?</span>
+          </div>
+          <div class="usage-summary-value ${cheapPathClass}">${formatRateLabel(cheapPathRate)}</div>
+          <div class="usage-summary-sub">
+            ${agenticStats.cheapPathRuns} cheap | ${agenticStats.routedRuns} routed
+          </div>
+        </div>
+        <div class="usage-summary-card">
+          <div class="usage-summary-title">
+            Working-Set Hit Rate
+            <span class="usage-summary-hint" title=${workingSetHint}>?</span>
+          </div>
+          <div class="usage-summary-value ${workingSetClass}">${formatRateLabel(workingSetHitRate)}</div>
+          <div class="usage-summary-sub">
+            ${agenticStats.workingSetHitCalls} hit searches | ${agenticStats.memorySearchCalls} recalls
+          </div>
+        </div>
+        <div class="usage-summary-card">
+          <div class="usage-summary-title">
+            Escalations
+            <span class="usage-summary-hint" title=${escalationHint}>?</span>
+          </div>
+          <div class="usage-summary-value ${escalationClass}">${formatRateLabel(escalationRate)}</div>
+          <div class="usage-summary-sub">
+            ${agenticStats.escalations} escalated | ${agenticStats.routedRuns} routed
+          </div>
+        </div>
+        <div class="usage-summary-card">
+          <div class="usage-summary-title">
+            Conflict Signals
+            <span class="usage-summary-hint" title=${conflictHint}>?</span>
+          </div>
+          <div class="usage-summary-value ${conflictClass}">${agenticStats.delegationConflictSignals}</div>
+          <div class="usage-summary-sub">
+            ${conflictBase} reports | ${agenticStats.structuredDelegationReports} structured
           </div>
         </div>
       </div>
@@ -535,6 +788,8 @@ function renderUsageInsights(
         ${renderInsightList("Top Tools", topTools, "No tool calls")}
         ${renderInsightList("Top Agents", topAgents, "No agent data")}
         ${renderInsightList("Top Channels", topChannels, "No channel data")}
+        ${renderInsightList("Agentic by Agent", agenticByAgent, "No agentic agent data")}
+        ${renderInsightList("Agentic by Channel", agenticByChannel, "No agentic channel data")}
         ${renderPeakErrorList("Peak Error Days", errorDays, "No error data")}
         ${renderPeakErrorList("Peak Error Hours", errorHours, "No error data")}
       </div>
@@ -601,7 +856,7 @@ function renderSessionsCard(
       parts.push(`errors:${s.usage.messageCounts.errors}`);
     }
     if (showColumn("duration") && s.usage?.durationMs) {
-      parts.push(`dur:${formatDurationCompact(s.usage.durationMs, { spaced: true }) ?? "—"}`);
+      parts.push(`dur:${formatDurationCompact(s.usage.durationMs, { spaced: true }) ?? "?"}`);
     }
     return parts;
   };
@@ -661,7 +916,7 @@ function renderSessionsCard(
       >
         <div class="session-bar-label">
           <div class="session-bar-title">${displayLabel}</div>
-          ${meta.length > 0 ? html`<div class="session-bar-meta">${meta.join(" · ")}</div>` : nothing}
+          ${meta.length > 0 ? html`<div class="session-bar-meta">${meta.join(" ? ")}</div>` : nothing}
         </div>
         <div class="session-bar-track" style="display: none;"></div>
         <div class="session-bar-actions">
@@ -694,7 +949,7 @@ function renderSessionsCard(
       <div class="sessions-card-header">
         <div class="card-title">Sessions</div>
         <div class="sessions-card-count">
-          ${sessions.length} shown${totalSessions !== sessions.length ? ` · ${totalSessions} total` : ""}
+          ${sessions.length} shown${totalSessions !== sessions.length ? ` ? ${totalSessions} total` : ""}
         </div>
       </div>
       <div class="sessions-card-meta">
@@ -733,7 +988,7 @@ function renderSessionsCard(
           @click=${() => onSessionSortDirChange(sessionSortDir === "desc" ? "asc" : "desc")}
           title=${sessionSortDir === "desc" ? "Descending" : "Ascending"}
         >
-          ${sessionSortDir === "desc" ? "↓" : "↑"}
+          ${sessionSortDir === "desc" ? "?" : "?"}
         </button>
         ${
           selectedCount > 0
@@ -786,6 +1041,7 @@ function renderSessionsCard(
 }
 
 export {
+  buildUsageAgenticOverviewStats,
   renderCostBreakdownCompact,
   renderDailyChartCompact,
   renderFilterChips,

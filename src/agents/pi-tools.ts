@@ -1,12 +1,13 @@
 import { codingTools, createReadTool, readTool } from "@mariozechner/pi-coding-agent";
 import type { OpenClawConfig } from "../config/config.js";
-import type { ToolLoopDetectionConfig } from "../config/types.tools.js";
+import type { ToolLoopDetectionConfig, ToolResultCacheConfig } from "../config/types.tools.js";
 import { resolveMergedSafeBinProfileFixtures } from "../infra/exec-safe-bin-runtime-policy.js";
 import { logWarn } from "../logger.js";
 import { getPluginToolMeta } from "../plugins/tools.js";
 import { isSubagentSessionKey } from "../routing/session-key.js";
 import { resolveGatewayMessageChannel } from "../utils/message-channel.js";
 import { resolveAgentConfig } from "./agent-scope.js";
+import { resolveMemorySearchConfig } from "./memory-search.js";
 import { createApplyPatchTool } from "./apply-patch.js";
 import {
   createExecTool,
@@ -124,6 +125,8 @@ function resolveExecConfig(params: { cfg?: OpenClawConfig; agentId?: string }) {
     host: agentExec?.host ?? globalExec?.host,
     security: agentExec?.security ?? globalExec?.security,
     ask: agentExec?.ask ?? globalExec?.ask,
+    blockDestructive: agentExec?.blockDestructive ?? globalExec?.blockDestructive,
+    destructiveMode: agentExec?.destructiveMode ?? globalExec?.destructiveMode,
     node: agentExec?.node ?? globalExec?.node,
     pathPrepend: agentExec?.pathPrepend ?? globalExec?.pathPrepend,
     safeBins: agentExec?.safeBins ?? globalExec?.safeBins,
@@ -171,6 +174,29 @@ export function resolveToolLoopDetectionConfig(params: {
   };
 }
 
+export function resolveToolResultCacheConfig(params: {
+  cfg?: OpenClawConfig;
+  agentId?: string;
+}): ToolResultCacheConfig | undefined {
+  const global = params.cfg?.tools?.toolResultCache;
+  const agent =
+    params.agentId && params.cfg
+      ? resolveAgentConfig(params.cfg, params.agentId)?.tools?.toolResultCache
+      : undefined;
+
+  if (!agent) {
+    return global;
+  }
+  if (!global) {
+    return agent;
+  }
+
+  return {
+    ...global,
+    ...agent,
+    cacheableTools: agent.cacheableTools ?? global.cacheableTools,
+  };
+}
 export const __testing = {
   cleanToolSchemaForGemini,
   normalizeToolParams,
@@ -304,12 +330,20 @@ export function createOpenClawCodingTools(options?: {
   const fsConfig = resolveToolFsConfig({ cfg: options?.config, agentId });
   const fsPolicy = createToolFsPolicy({
     workspaceOnly: fsConfig.workspaceOnly,
+    allowPaths: fsConfig.allowPaths,
+    denyPaths: fsConfig.denyPaths,
+    readOnlyPaths: fsConfig.readOnlyPaths,
   });
   const sandboxRoot = sandbox?.workspaceDir;
   const sandboxFsBridge = sandbox?.fsBridge;
   const allowWorkspaceWrites = sandbox?.workspaceAccess !== "ro";
   const workspaceRoot = resolveWorkspaceRoot(options?.workspaceDir);
   const workspaceOnly = fsPolicy.workspaceOnly;
+  const hasPathScopedFsPolicy = Boolean(
+    (fsPolicy.allowPaths && fsPolicy.allowPaths.length > 0) ||
+      (fsPolicy.denyPaths && fsPolicy.denyPaths.length > 0) ||
+      (fsPolicy.readOnlyPaths && fsPolicy.readOnlyPaths.length > 0),
+  );
   const applyPatchConfig = execConfig.applyPatch;
   // Secure by default: apply_patch is workspace-contained unless explicitly disabled.
   // (tools.fs.workspaceOnly is a separate umbrella flag for read/write/edit/apply_patch.)
@@ -338,9 +372,12 @@ export function createOpenClawCodingTools(options?: {
           imageSanitization,
         });
         return [
-          workspaceOnly
+          workspaceOnly || hasPathScopedFsPolicy
             ? wrapToolWorkspaceRootGuardWithOptions(sandboxed, sandboxRoot, {
                 containerWorkdir: sandbox.containerWorkdir,
+                fsPolicy,
+                operation: "read",
+                enforceWorkspaceRoot: workspaceOnly,
               })
             : sandboxed,
         ];
@@ -350,7 +387,15 @@ export function createOpenClawCodingTools(options?: {
         modelContextWindowTokens: options?.modelContextWindowTokens,
         imageSanitization,
       });
-      return [workspaceOnly ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot) : wrapped];
+      return [
+        workspaceOnly || hasPathScopedFsPolicy
+          ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot, {
+              fsPolicy,
+              operation: "read",
+              enforceWorkspaceRoot: workspaceOnly,
+            })
+          : wrapped,
+      ];
     }
     if (tool.name === "bash" || tool.name === execToolName) {
       return [];
@@ -360,14 +405,30 @@ export function createOpenClawCodingTools(options?: {
         return [];
       }
       const wrapped = createHostWorkspaceWriteTool(workspaceRoot, { workspaceOnly });
-      return [workspaceOnly ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot) : wrapped];
+      return [
+        workspaceOnly || hasPathScopedFsPolicy
+          ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot, {
+              fsPolicy,
+              operation: "write",
+              enforceWorkspaceRoot: workspaceOnly,
+            })
+          : wrapped,
+      ];
     }
     if (tool.name === "edit") {
       if (sandboxRoot) {
         return [];
       }
       const wrapped = createHostWorkspaceEditTool(workspaceRoot, { workspaceOnly });
-      return [workspaceOnly ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot) : wrapped];
+      return [
+        workspaceOnly || hasPathScopedFsPolicy
+          ? wrapToolWorkspaceRootGuard(wrapped, workspaceRoot, {
+              fsPolicy,
+              operation: "write",
+              enforceWorkspaceRoot: workspaceOnly,
+            })
+          : wrapped,
+      ];
     }
     return [tool];
   });
@@ -377,6 +438,8 @@ export function createOpenClawCodingTools(options?: {
     host: options?.exec?.host ?? execConfig.host,
     security: options?.exec?.security ?? execConfig.security,
     ask: options?.exec?.ask ?? execConfig.ask,
+    blockDestructive: options?.exec?.blockDestructive ?? execConfig.blockDestructive,
+    destructiveMode: options?.exec?.destructiveMode ?? execConfig.destructiveMode,
     node: options?.exec?.node ?? execConfig.node,
     pathPrepend: options?.exec?.pathPrepend ?? execConfig.pathPrepend,
     safeBins: options?.exec?.safeBins ?? execConfig.safeBins,
@@ -421,27 +484,34 @@ export function createOpenClawCodingTools(options?: {
               ? { root: sandboxRoot, bridge: sandboxFsBridge! }
               : undefined,
           workspaceOnly: applyPatchWorkspaceOnly,
+          fsPolicy,
         });
   const tools: AnyAgentTool[] = [
     ...base,
     ...(sandboxRoot
       ? allowWorkspaceWrites
         ? [
-            workspaceOnly
+            workspaceOnly || hasPathScopedFsPolicy
               ? wrapToolWorkspaceRootGuardWithOptions(
                   createSandboxedEditTool({ root: sandboxRoot, bridge: sandboxFsBridge! }),
                   sandboxRoot,
                   {
                     containerWorkdir: sandbox.containerWorkdir,
+                    fsPolicy,
+                    operation: "write",
+                    enforceWorkspaceRoot: workspaceOnly,
                   },
                 )
               : createSandboxedEditTool({ root: sandboxRoot, bridge: sandboxFsBridge! }),
-            workspaceOnly
+            workspaceOnly || hasPathScopedFsPolicy
               ? wrapToolWorkspaceRootGuardWithOptions(
                   createSandboxedWriteTool({ root: sandboxRoot, bridge: sandboxFsBridge! }),
                   sandboxRoot,
                   {
                     containerWorkdir: sandbox.containerWorkdir,
+                    fsPolicy,
+                    operation: "write",
+                    enforceWorkspaceRoot: workspaceOnly,
                   },
                 )
               : createSandboxedWriteTool({ root: sandboxRoot, bridge: sandboxFsBridge! }),
@@ -529,11 +599,16 @@ export function createOpenClawCodingTools(options?: {
       modelId: options?.modelId,
     }),
   );
+  const resolvedMemorySearch = options?.config && agentId
+    ? resolveMemorySearchConfig(options.config, agentId)
+    : undefined;
   const withHooks = normalized.map((tool) =>
     wrapToolWithBeforeToolCallHook(tool, {
       agentId,
       sessionKey: options?.sessionKey,
       loopDetection: resolveToolLoopDetectionConfig({ cfg: options?.config, agentId }),
+      toolResultCache: resolveToolResultCacheConfig({ cfg: options?.config, agentId }),
+      workingSet: resolvedMemorySearch?.workingSet,
     }),
   );
   const withAbort = options?.abortSignal
@@ -545,3 +620,4 @@ export function createOpenClawCodingTools(options?: {
   // on the wire and maps them back for tool dispatch.
   return withAbort;
 }
+

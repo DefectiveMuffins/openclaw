@@ -32,6 +32,21 @@ describe("FS tools with workspaceOnly=false", () => {
             },
     });
 
+  const toolsForFsConfig = (fsConfig: {
+    workspaceOnly?: boolean;
+    allowPaths?: string[];
+    denyPaths?: string[];
+    readOnlyPaths?: string[];
+  }) =>
+    createOpenClawCodingTools({
+      workspaceDir,
+      config: {
+        tools: {
+          fs: fsConfig,
+        },
+      },
+    });
+
   const runFsTool = async (
     toolName: "write" | "edit" | "read",
     callId: string,
@@ -180,5 +195,60 @@ describe("FS tools with workspaceOnly=false", () => {
         content: "test content",
       }),
     ).rejects.toThrow(/Path escapes (workspace|sandbox) root/);
+  });
+
+  it("enforces denyPaths when workspaceOnly=false", async () => {
+    const deniedPath = path.join(workspaceDir, "secrets", "key.txt");
+    const tools = toolsForFsConfig({
+      workspaceOnly: false,
+      denyPaths: ["secrets/"],
+    });
+    const writeTool = tools.find((tool) => tool.name === "write");
+    expect(writeTool).toBeDefined();
+
+    await expect(
+      writeTool!.execute("test-call-deny-paths", {
+        path: deniedPath,
+        content: "secret",
+      }),
+    ).rejects.toThrow(/Filesystem access denied: path denied by tools\.fs\.denyPaths: secrets\//);
+  });
+
+  it("enforces allowPaths when workspaceOnly=false", async () => {
+    const blockedPath = path.join(workspaceDir, "notes", "todo.md");
+    const tools = toolsForFsConfig({
+      workspaceOnly: false,
+      allowPaths: ["memory/"],
+    });
+    const writeTool = tools.find((tool) => tool.name === "write");
+    expect(writeTool).toBeDefined();
+
+    await expect(
+      writeTool!.execute("test-call-allow-paths", {
+        path: blockedPath,
+        content: "todo",
+      }),
+    ).rejects.toThrow(/Filesystem access denied: path is outside tools\.fs\.allowPaths/);
+  });
+
+  it("enforces readOnlyPaths when workspaceOnly=false", async () => {
+    const readonlyPath = path.join(workspaceDir, "AGENTS.md");
+    await fs.writeFile(readonlyPath, "before");
+    const tools = toolsForFsConfig({
+      workspaceOnly: false,
+      readOnlyPaths: ["AGENTS.md"],
+    });
+    const editTool = tools.find((tool) => tool.name === "edit");
+    expect(editTool).toBeDefined();
+
+    await expect(
+      editTool!.execute("test-call-readonly", {
+        path: readonlyPath,
+        oldText: "before",
+        newText: "after",
+      }),
+    ).rejects.toThrow(
+      /Filesystem access denied: path is read-only via tools\.fs\.readOnlyPaths: AGENTS\.md/,
+    );
   });
 });

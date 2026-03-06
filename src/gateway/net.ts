@@ -383,17 +383,16 @@ function parseHostForAddressChecks(
   if (!host) {
     return null;
   }
-  const normalizedHost = host.trim().toLowerCase();
+  const normalizedHost = resolveHostName(host).trim().toLowerCase();
+  if (!normalizedHost) {
+    return null;
+  }
   if (normalizedHost === "localhost") {
     return { isLocalhost: true, unbracketedHost: normalizedHost };
   }
   return {
     isLocalhost: false,
-    // Handle bracketed IPv6 addresses like [::1]
-    unbracketedHost:
-      normalizedHost.startsWith("[") && normalizedHost.endsWith("]")
-        ? normalizedHost.slice(1, -1)
-        : normalizedHost,
+    unbracketedHost: normalizedHost,
   };
 }
 

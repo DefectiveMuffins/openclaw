@@ -12,10 +12,12 @@ import {
 import { detectMime } from "../media/mime.js";
 import { sniffMimeFromBase64 } from "../media/sniff-mime-from-base64.js";
 import type { ImageSanitizationLimits } from "./image-sanitization.js";
+import { checkFsAccess, type FsAccessOperation } from "./fs-path-access.js";
 import { toRelativeWorkspacePath } from "./path-policy.js";
 import type { AnyAgentTool } from "./pi-tools.types.js";
 import { assertSandboxPath } from "./sandbox-paths.js";
 import type { SandboxFsBridge } from "./sandbox/fs-bridge.js";
+import type { ToolFsPolicy } from "./tool-fs-policy.js";
 import { sanitizeToolResultImages } from "./tool-images.js";
 
 // NOTE(steipete): Upstream read now does file-magic MIME detection; we keep the wrapper
@@ -558,8 +560,16 @@ export function wrapToolParamNormalization(
   };
 }
 
-export function wrapToolWorkspaceRootGuard(tool: AnyAgentTool, root: string): AnyAgentTool {
-  return wrapToolWorkspaceRootGuardWithOptions(tool, root);
+export function wrapToolWorkspaceRootGuard(
+  tool: AnyAgentTool,
+  root: string,
+  options?: {
+    fsPolicy?: ToolFsPolicy;
+    operation?: FsAccessOperation;
+    enforceWorkspaceRoot?: boolean;
+  },
+): AnyAgentTool {
+  return wrapToolWorkspaceRootGuardWithOptions(tool, root, options);
 }
 
 function mapContainerPathToWorkspaceRoot(params: {
@@ -619,6 +629,9 @@ export function wrapToolWorkspaceRootGuardWithOptions(
   root: string,
   options?: {
     containerWorkdir?: string;
+    fsPolicy?: ToolFsPolicy;
+    operation?: FsAccessOperation;
+    enforceWorkspaceRoot?: boolean;
   },
 ): AnyAgentTool {
   return {
@@ -635,7 +648,21 @@ export function wrapToolWorkspaceRootGuardWithOptions(
           root,
           containerWorkdir: options?.containerWorkdir,
         });
-        await assertSandboxPath({ filePath: sandboxPath, cwd: root, root });
+        const enforceWorkspaceRoot = options?.enforceWorkspaceRoot !== false;
+        if (enforceWorkspaceRoot) {
+          await assertSandboxPath({ filePath: sandboxPath, cwd: root, root });
+        }
+        if (options?.fsPolicy) {
+          const access = checkFsAccess(
+            sandboxPath,
+            root,
+            options.operation ?? "read",
+            options.fsPolicy,
+          );
+          if (!access.allowed) {
+            throw new Error(`Filesystem access denied: ${access.reason}`);
+          }
+        }
       }
       return tool.execute(toolCallId, normalized ?? args, signal, onUpdate);
     },

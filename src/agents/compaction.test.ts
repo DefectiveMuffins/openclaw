@@ -1,8 +1,10 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { describe, expect, it } from "vitest";
 import {
+  collectRecentIdentifiers,
   estimateMessagesTokens,
   pruneHistoryForContextShare,
+  scoreMessageRelevance,
   splitMessagesByTokenShare,
 } from "./compaction.js";
 
@@ -262,5 +264,60 @@ describe("pruneHistoryForContextShare", () => {
     // droppedMessages = 1 (assistant) + 2 (orphaned tool_results) = 3
     // droppedMessagesList only has the assistant message
     expect(pruned.droppedMessages).toBe(pruned.droppedMessagesList.length + 2);
+  });
+});
+
+describe("relevance helpers", () => {
+  it("extracts identifiers from recent messages", () => {
+    const identifiers = collectRecentIdentifiers([
+      {
+        role: "user",
+        content: "Edit `src/agents/compaction.ts` and call runEmbeddedAttempt()",
+        timestamp: 1,
+      },
+    ] as AgentMessage[]);
+
+    expect(identifiers.has("src/agents/compaction.ts")).toBe(true);
+    expect(identifiers.has("runembeddedattempt")).toBe(true);
+  });
+
+  it("scores message relevance by identifier overlap", () => {
+    const score = scoreMessageRelevance(
+      {
+        role: "user",
+        content: "Investigate `src/agents/compaction.ts`",
+        timestamp: 1,
+      } as AgentMessage,
+      new Set(["src/agents/compaction.ts"]),
+    );
+
+    expect(score).toBeGreaterThan(0);
+  });
+});
+
+describe("pruneHistoryForContextShare relevance strategy", () => {
+  it("drops low-relevance chunks before older relevant chunks", () => {
+    const payload = "x".repeat(3900);
+    const messages: AgentMessage[] = [
+      { role: "user", content: "alphaTaskOne() " + payload, timestamp: 1 },
+      { role: "user", content: "alphaTaskOne() " + payload, timestamp: 2 },
+      { role: "user", content: "bravoTaskTwo() " + payload, timestamp: 3 },
+      { role: "user", content: "bravoTaskTwo() " + payload, timestamp: 4 },
+      { role: "user", content: "alphaTaskOne() " + payload, timestamp: 5 },
+      { role: "user", content: "alphaTaskOne() " + payload, timestamp: 6 },
+    ];
+
+    const pruned = pruneHistoryForContextShare({
+      messages,
+      maxContextTokens: 8_000,
+      maxHistoryShare: 0.5,
+      parts: 3,
+      pruningStrategy: "relevance",
+      recentIdentifierWindow: 2,
+    });
+
+    const droppedIds = pruned.droppedMessagesList.map((msg) => msg.timestamp);
+    expect(droppedIds).toEqual([3, 4]);
+    expect(pruned.messages.map((msg) => msg.timestamp)).toEqual([1, 2, 5, 6]);
   });
 });

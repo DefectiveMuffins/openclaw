@@ -25,6 +25,8 @@ export function buildEmbeddedSystemPrompt(params: {
     level: "minimal" | "extensive";
     channel: string;
   };
+  toolProfile?: string;
+  memoryStalenessHint?: string;
   workspaceNotes?: string[];
   /** Controls which hardcoded sections to include. Defaults to "full". */
   promptMode?: PromptMode;
@@ -81,6 +83,8 @@ export function buildEmbeddedSystemPrompt(params: {
     userTimeFormat: params.userTimeFormat,
     contextFiles: params.contextFiles,
     memoryCitationsMode: params.memoryCitationsMode,
+    toolProfile: params.toolProfile,
+    memoryStalenessHint: params.memoryStalenessHint,
   });
 }
 

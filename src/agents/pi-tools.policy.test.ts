@@ -3,6 +3,7 @@ import type { OpenClawConfig } from "../config/config.js";
 import {
   filterToolsByPolicy,
   isToolAllowedByPolicyName,
+  resolveEffectiveToolPolicy,
   resolveSubagentToolPolicy,
 } from "./pi-tools.policy.js";
 import { createStubTool } from "./test-helpers/pi-tool-stubs.js";
@@ -30,6 +31,40 @@ describe("pi-tools.policy", () => {
   });
 });
 
+
+describe("resolveEffectiveToolPolicy default orchestrator", () => {
+  it("defaults top-level requester sessions to the orchestrator profile", () => {
+    const resolved = resolveEffectiveToolPolicy({
+      config: {} as OpenClawConfig,
+      sessionKey: "agent:main:main",
+    });
+    expect(resolved.profile).toBe("orchestrator");
+  });
+
+  it("does not force orchestrator profile for subagent sessions", () => {
+    const resolved = resolveEffectiveToolPolicy({
+      config: {} as OpenClawConfig,
+      sessionKey: "agent:main:subagent:worker",
+    });
+    expect(resolved.profile).toBeUndefined();
+  });
+
+  it("does not force orchestrator profile for cron sessions", () => {
+    const resolved = resolveEffectiveToolPolicy({
+      config: {} as OpenClawConfig,
+      sessionKey: "agent:main:cron:daily",
+    });
+    expect(resolved.profile).toBeUndefined();
+  });
+
+  it("forces orchestrator profile for top-level requester sessions even when configured otherwise", () => {
+    const resolved = resolveEffectiveToolPolicy({
+      config: { tools: { profile: "messaging" } } as OpenClawConfig,
+      sessionKey: "agent:main:main",
+    });
+    expect(resolved.profile).toBe("orchestrator");
+  });
+});
 describe("resolveSubagentToolPolicy depth awareness", () => {
   const baseCfg = {
     agents: { defaults: { subagents: { maxSpawnDepth: 2 } } },
@@ -176,3 +211,4 @@ describe("resolveSubagentToolPolicy depth awareness", () => {
     expect(isToolAllowedByPolicyName("sessions_spawn", policy)).toBe(false);
   });
 });
+

@@ -344,6 +344,10 @@ export type PluginHookAgentContext = {
 export type PluginHookBeforeModelResolveEvent = {
   /** User prompt for this run. No session messages are available yet in this phase. */
   prompt: string;
+  phase?: "planner" | "retrieval" | "compression" | "subagent" | "synthesis" | "verification";
+  taskType?: string;
+  estimatedComplexity?: "simple" | "complex";
+  readOnly?: boolean;
 };
 
 export type PluginHookBeforeModelResolveResult = {
@@ -574,6 +578,11 @@ type PluginHookSubagentSpawnBase = {
   childSessionKey: string;
   agentId: string;
   label?: string;
+  role?: "research" | "edit" | "verify" | "summarize";
+  deliverable?: string;
+  acceptance?: string[];
+  responseFormat?: "text" | "structured";
+  readOnly?: boolean;
   mode: "run" | "session";
   requester?: {
     channel?: string;
@@ -601,6 +610,8 @@ export type PluginHookSubagentSpawningResult =
 export type PluginHookSubagentDeliveryTargetEvent = {
   childSessionKey: string;
   requesterSessionKey: string;
+  role?: "research" | "edit" | "verify" | "summarize";
+  responseFormat?: "text" | "structured";
   requesterOrigin?: {
     channel?: string;
     accountId?: string;

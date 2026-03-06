@@ -58,6 +58,10 @@ describe("tool-policy", () => {
     expect(coding?.allow).toContain("read");
     expect(coding?.allow).toContain("cron");
     expect(coding?.allow).not.toContain("gateway");
+    const orchestrator = resolveToolProfilePolicy("orchestrator");
+    expect(orchestrator?.allow).toContain("sessions_spawn");
+    expect(orchestrator?.allow).toContain("message");
+    expect(orchestrator?.allow).not.toContain("exec");
     expect(resolveToolProfilePolicy("nope")).toBeUndefined();
   });
 

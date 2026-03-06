@@ -7,9 +7,11 @@ import { openBoundaryFile, type BoundaryFileOpenResult } from "../infra/boundary
 import { writeFileWithinRoot } from "../infra/fs-safe.js";
 import { PATH_ALIAS_POLICIES, type PathAliasPolicy } from "../infra/path-alias-guards.js";
 import { applyUpdateHunk } from "./apply-patch-update.js";
+import { checkFsAccess } from "./fs-path-access.js";
 import { toRelativeSandboxPath, resolvePathFromInput } from "./path-policy.js";
 import { assertSandboxPath } from "./sandbox-paths.js";
 import type { SandboxFsBridge } from "./sandbox/fs-bridge.js";
+import type { ToolFsPolicy } from "./tool-fs-policy.js";
 
 const BEGIN_PATCH_MARKER = "*** Begin Patch";
 const END_PATCH_MARKER = "*** End Patch";
@@ -73,6 +75,8 @@ type ApplyPatchOptions = {
   sandbox?: SandboxApplyPatchConfig;
   /** Restrict patch paths to the workspace root (cwd). Default: true. Set false to opt out. */
   workspaceOnly?: boolean;
+  /** Optional folder-level path policy (allow/deny/readOnly). */
+  fsPolicy?: ToolFsPolicy;
   signal?: AbortSignal;
 };
 
@@ -83,7 +87,12 @@ const applyPatchSchema = Type.Object({
 });
 
 export function createApplyPatchTool(
-  options: { cwd?: string; sandbox?: SandboxApplyPatchConfig; workspaceOnly?: boolean } = {},
+  options: {
+    cwd?: string;
+    sandbox?: SandboxApplyPatchConfig;
+    workspaceOnly?: boolean;
+    fsPolicy?: ToolFsPolicy;
+  } = {},
 ): AgentTool<typeof applyPatchSchema, ApplyPatchToolDetails> {
   const cwd = options.cwd ?? process.cwd();
   const sandbox = options.sandbox;
@@ -111,6 +120,7 @@ export function createApplyPatchTool(
         cwd,
         sandbox,
         workspaceOnly,
+        fsPolicy: options.fsPolicy,
         signal,
       });
 
@@ -302,6 +312,12 @@ async function resolvePatchPath(
         allowFinalHardlinkForUnlink: aliasPolicy.allowFinalHardlinkForUnlink,
       });
     }
+    const policyResult = options.fsPolicy
+      ? checkFsAccess(resolved.hostPath, options.cwd, "write", options.fsPolicy)
+      : { allowed: true as const };
+    if (!policyResult.allowed) {
+      throw new Error(`Filesystem access denied: ${policyResult.reason}`);
+    }
     return {
       resolved: resolved.hostPath,
       display: resolved.relativePath || resolved.hostPath,
@@ -320,6 +336,12 @@ async function resolvePatchPath(
         })
       ).resolved
     : resolvePathFromInput(filePath, options.cwd);
+  const policyResult = options.fsPolicy
+    ? checkFsAccess(resolved, options.cwd, "write", options.fsPolicy)
+    : { allowed: true as const };
+  if (!policyResult.allowed) {
+    throw new Error(`Filesystem access denied: ${policyResult.reason}`);
+  }
   return {
     resolved,
     display: toDisplayPath(resolved, options.cwd),

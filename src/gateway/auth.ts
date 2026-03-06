@@ -15,6 +15,8 @@ import { resolveGatewayCredentialsFromValues } from "./credentials.js";
 import {
   isLocalishHost,
   isLoopbackAddress,
+  isPrivateOrLoopbackAddress,
+  isPrivateOrLoopbackHost,
   isTrustedProxyAddress,
   resolveClientIp,
 } from "./net.js";
@@ -142,6 +144,32 @@ export function isLocalDirectRequest(
 
   const remoteIsTrustedProxy = isTrustedProxyAddress(req.socket?.remoteAddress, trustedProxies);
   return isLocalishHost(req.headers?.host) && (!hasForwarded || remoteIsTrustedProxy);
+}
+
+export function isPrivateNetworkDirectRequest(
+  req?: IncomingMessage,
+  trustedProxies?: string[],
+  allowRealIpFallback = false,
+): boolean {
+  if (!req) {
+    return false;
+  }
+  const clientIp = resolveRequestClientIp(req, trustedProxies, allowRealIpFallback) ?? "";
+  if (!isPrivateOrLoopbackAddress(clientIp)) {
+    return false;
+  }
+
+  const hasForwarded = Boolean(
+    req.headers?.["x-forwarded-for"] ||
+      req.headers?.["x-real-ip"] ||
+      req.headers?.["x-forwarded-host"],
+  );
+  if (hasForwarded) {
+    return false;
+  }
+
+  const host = headerValue(req.headers?.host);
+  return typeof host === "string" && isPrivateOrLoopbackHost(host);
 }
 
 function getTailscaleUser(req?: IncomingMessage): TailscaleUser | null {

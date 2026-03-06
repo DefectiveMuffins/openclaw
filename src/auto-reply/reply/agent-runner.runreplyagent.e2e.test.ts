@@ -2,6 +2,10 @@ import fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  recordDelegatedSubagentSpawn,
+  resetDelegationTracking,
+} from "../../agents/delegation-enforcement.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import * as sessions from "../../config/sessions.js";
 import type { TypingMode } from "../../config/types.js";
@@ -93,6 +97,7 @@ beforeEach(() => {
   state.runCliAgentMock.mockClear();
   vi.mocked(enqueueFollowupRun).mockClear();
   vi.mocked(scheduleFollowupDrain).mockClear();
+  resetDelegationTracking({ sessionKey: "main", sessionId: "session" });
   vi.stubEnv("OPENCLAW_TEST_FAST", "1");
 });
 
@@ -367,6 +372,45 @@ describe("runReplyAgent typing (heartbeat)", () => {
     return { storePath, sessionEntry, sessionStore, transcriptPath };
   }
 
+  it("suppresses assistant streaming until a subagent spawn has been recorded", async () => {
+    const onPartialReply = vi.fn();
+    const onReasoningStream = vi.fn();
+    const onBlockReply = vi.fn();
+    state.runEmbeddedPiAgentMock.mockImplementationOnce(async (params: AgentRunParams) => {
+      await params.onReasoningStream?.({ text: "Reasoning before delegation" });
+      await params.onAssistantMessageStart?.();
+      await params.onPartialReply?.({ text: "direct answer leak" });
+      await params.onBlockReply?.({ text: "direct block leak", mediaUrls: [] });
+      recordDelegatedSubagentSpawn({ sessionKey: "main", sessionId: "session" }, "agent:main:subagent:child-1");
+      await params.onReasoningStream?.({ text: "Reasoning after delegation" });
+      await params.onAssistantMessageStart?.();
+      await params.onPartialReply?.({ text: "delegated answer chunk" });
+      await params.onBlockReply?.({ text: "delegated block", mediaUrls: [] });
+      return { payloads: [{ text: "final" }], meta: {} };
+    });
+
+    const { run, typing } = createMinimalRun({
+      opts: { isHeartbeat: false, onPartialReply, onReasoningStream, onBlockReply },
+      blockStreamingEnabled: true,
+      typingMode: "thinking",
+      sessionKey: "main",
+    });
+    await run();
+
+    expect(onReasoningStream).toHaveBeenCalledTimes(1);
+    expect(onReasoningStream).toHaveBeenCalledWith({
+      text: "Reasoning after delegation",
+      mediaUrls: undefined,
+    });
+    expect(onPartialReply).toHaveBeenCalledTimes(1);
+    expect(onPartialReply).toHaveBeenCalledWith({
+      text: "delegated answer chunk",
+      mediaUrls: undefined,
+    });
+    expect(onBlockReply).toHaveBeenCalledTimes(1);
+    expect(onBlockReply.mock.calls[0]?.[0]).toMatchObject({ text: "delegated block" });
+    expect(typing.startTypingLoop).toHaveBeenCalled();
+  });
   it("signals typing for normal runs", async () => {
     const onPartialReply = vi.fn();
     state.runEmbeddedPiAgentMock.mockImplementationOnce(async (params: AgentRunParams) => {
@@ -376,6 +420,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
 
     const { run, typing } = createMinimalRun({
       opts: { isHeartbeat: false, onPartialReply },
+      sessionKey: "agent:main:subagent:test",
     });
     await run();
 
@@ -393,6 +438,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
 
     const { run, typing } = createMinimalRun({
       opts: { isHeartbeat: true, onPartialReply },
+      sessionKey: "agent:main:subagent:test",
     });
     await run();
 
@@ -435,6 +481,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
       const { run, typing } = createMinimalRun({
         opts: { isHeartbeat: false, onPartialReply },
         typingMode: "message",
+        sessionKey: "agent:main:subagent:test",
       });
       await run();
 
@@ -467,6 +514,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
 
     const { run, typing } = createMinimalRun({
       typingMode: "message",
+      sessionKey: "agent:main:subagent:test",
     });
     await run();
 
@@ -483,6 +531,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
 
     const { run, typing } = createMinimalRun({
       typingMode: "thinking",
+      sessionKey: "agent:main:subagent:test",
     });
     await run();
 
@@ -502,6 +551,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
     const { run } = createMinimalRun({
       opts: { onPartialReply, onReasoningStream },
       runOverrides: { reasoningLevel: "stream" },
+      sessionKey: "agent:main:subagent:test",
     });
     await run();
 
@@ -517,6 +567,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
 
     const { run, typing } = createMinimalRun({
       typingMode: "never",
+      sessionKey: "agent:main:subagent:test",
     });
     await run();
 
@@ -535,6 +586,7 @@ describe("runReplyAgent typing (heartbeat)", () => {
       typingMode: "message",
       blockStreamingEnabled: true,
       opts: { onBlockReply },
+      sessionKey: "agent:main:subagent:test",
     });
     await run();
 
@@ -1874,3 +1926,6 @@ describe("runReplyAgent memory flush", () => {
     });
   });
 });
+
+
+

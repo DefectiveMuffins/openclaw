@@ -7,7 +7,13 @@ import type { SessionEntry } from "../../config/sessions.js";
 import { listChatCommands, shouldHandleTextCommands } from "../commands-registry.js";
 import { listSkillCommandsForWorkspace } from "../skill-commands.js";
 import type { MsgContext, TemplateContext } from "../templating.js";
-import type { ElevatedLevel, ReasoningLevel, ThinkLevel, VerboseLevel } from "../thinking.js";
+import {
+  resolveAdaptiveThinkLevel,
+  type ElevatedLevel,
+  type ReasoningLevel,
+  type ThinkLevel,
+  type VerboseLevel,
+} from "../thinking.js";
 import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import { resolveBlockStreamingChunking } from "./block-streaming.js";
 import { buildCommandContext } from "./commands.js";
@@ -23,6 +29,28 @@ import type { TypingController } from "./typing.js";
 
 type AgentDefaults = NonNullable<OpenClawConfig["agents"]>["defaults"];
 type ExecOverrides = Pick<ExecToolDefaults, "host" | "security" | "ask" | "node">;
+
+function collectAdaptiveHistoryContext(sessionCtx: TemplateContext): string[] {
+  const history: string[] = [];
+  const inbound = sessionCtx.InboundHistory;
+  if (Array.isArray(inbound)) {
+    for (const entry of inbound.slice(-4)) {
+      const body = entry?.body?.trim();
+      if (body) {
+        history.push(body);
+      }
+    }
+  }
+  const threadHistory = sessionCtx.ThreadHistoryBody?.trim();
+  if (threadHistory) {
+    history.push(threadHistory);
+  }
+  const transcript = sessionCtx.Transcript?.trim();
+  if (transcript) {
+    history.push(transcript);
+  }
+  return history.slice(-4);
+}
 
 export type ReplyDirectiveContinuation = {
   commandSource: string;
@@ -388,10 +416,17 @@ export async function resolveReplyDirectives(params: {
   });
   provider = modelState.provider;
   model = modelState.model;
-  const resolvedThinkLevelWithDefault =
+  let resolvedThinkLevelWithDefault =
     resolvedThinkLevel ??
     (await modelState.resolveDefaultThinkingLevel()) ??
     (agentCfg?.thinkingDefault as ThinkLevel | undefined);
+  if (resolvedThinkLevelWithDefault === "adaptive") {
+    const adaptiveSource = cleanedBody || commandText || promptSource;
+    resolvedThinkLevelWithDefault = resolveAdaptiveThinkLevel(
+      adaptiveSource,
+      collectAdaptiveHistoryContext(sessionCtx),
+    );
+  }
 
   // When neither directive nor session set reasoning, default to model capability
   // (e.g. OpenRouter with reasoning: true). Skip auto-enabling when thinking is
@@ -496,3 +531,6 @@ export async function resolveReplyDirectives(params: {
     },
   };
 }
+
+
+

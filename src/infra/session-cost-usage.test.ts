@@ -442,4 +442,99 @@ example
     expect(lastPoint?.cumulativeTokens).toBe(165);
     expect(lastPoint?.cumulativeCost).toBeCloseTo(0.055, 8);
   });
+
+  it("captures agentic retrieval and delegation summaries from tool results", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-cost-agentic-"));
+    const sessionFile = path.join(root, "session.jsonl");
+    const now = new Date("2026-02-20T10:00:00.000Z");
+
+    const entries = [
+      {
+        type: "message",
+        timestamp: now.toISOString(),
+        message: {
+          role: "user",
+          content: "find the cached design decision",
+        },
+      },
+      {
+        type: "message",
+        timestamp: new Date(now.getTime() + 1000).toISOString(),
+        message: {
+          role: "toolResult",
+          toolName: "memory_search",
+          content: JSON.stringify({
+            results: [{ path: "memory/decisions.md", text: "cached hit" }],
+            provider: "memory-store",
+            model: "text-embedding-3-small",
+            plan: {
+              intent: "decision",
+              strategy: "deep",
+              sourceBias: "working-set",
+              queries: ["design decision", "cached design decision"],
+            },
+            confidence: { score: 0.82, level: "high" },
+            workingSet: { enabled: true, hits: 2 },
+            transientOnly: false,
+          }),
+        },
+      },
+      {
+        type: "message",
+        timestamp: new Date(now.getTime() + 2000).toISOString(),
+        message: {
+          role: "toolResult",
+          toolName: "sessions_spawn",
+          content: JSON.stringify({
+            status: "accepted",
+            childSessionKey: "agent:main:subagent:child-1",
+            runId: "run-child-1",
+            modelApplied: "anthropic/claude-haiku-4-5",
+            delegation: {
+              role: "research",
+              responseFormat: "structured",
+              readOnly: true,
+            },
+          }),
+        },
+      },
+      {
+        type: "message",
+        timestamp: new Date(now.getTime() + 3000).toISOString(),
+        message: {
+          role: "assistant",
+          provider: "openai",
+          model: "gpt-5.2",
+          usage: {
+            input: 10,
+            output: 12,
+            totalTokens: 22,
+            cost: { total: 0.01 },
+          },
+          content: "done",
+        },
+      },
+    ];
+
+    await fs.writeFile(
+      sessionFile,
+      entries.map((entry) => JSON.stringify(entry)).join("\n"),
+      "utf-8",
+    );
+
+    const summary = await loadSessionCostSummary({ sessionFile });
+    expect(summary?.agentic?.memorySearch?.calls).toBe(1);
+    expect(summary?.agentic?.memorySearch?.lastIntent).toBe("decision");
+    expect(summary?.agentic?.memorySearch?.lastStrategy).toBe("deep");
+    expect(summary?.agentic?.memorySearch?.workingSetHits).toBe(2);
+    expect(summary?.agentic?.memorySearch?.hitCalls).toBe(1);
+    expect(summary?.agentic?.delegation?.spawnCalls).toBe(1);
+    expect(summary?.agentic?.delegation?.accepted).toBe(1);
+    expect(summary?.agentic?.delegation?.structuredResponses).toBe(1);
+    expect(summary?.agentic?.delegation?.readOnlySpawns).toBe(1);
+    expect(summary?.agentic?.delegation?.roles[0]?.role).toBe("research");
+    expect(summary?.agentic?.delegation?.modelsApplied).toEqual([
+      "anthropic/claude-haiku-4-5",
+    ]);
+  });
 });

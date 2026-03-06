@@ -285,6 +285,25 @@ export async function runMemoryFlushIfNeeded(params: {
   let entry =
     params.sessionEntry ??
     (params.sessionKey ? params.sessionStore?.[params.sessionKey] : undefined);
+  const nowMs = Date.now();
+  const currentTurnCountRaw = entry?.memoryFlushTurnCount;
+  const currentTurnCount =
+    typeof currentTurnCountRaw === "number" &&
+    Number.isFinite(currentTurnCountRaw) &&
+    currentTurnCountRaw >= 0
+      ? Math.floor(currentTurnCountRaw)
+      : 0;
+  const turnsSinceLastFlush = canAttemptFlush ? currentTurnCount + 1 : currentTurnCount;
+  if (entry && canAttemptFlush) {
+    const nextEntry = {
+      ...entry,
+      memoryFlushTurnCount: turnsSinceLastFlush,
+    };
+    entry = nextEntry;
+    if (params.sessionKey && params.sessionStore) {
+      params.sessionStore[params.sessionKey] = nextEntry;
+    }
+  }
   const contextWindowTokens = resolveMemoryFlushContextWindowTokens({
     modelId: params.followupRun.run.model ?? params.defaultModel,
     agentCfgContextTokens: params.agentCfgContextTokens,
@@ -419,6 +438,7 @@ export async function runMemoryFlushIfNeeded(params: {
       `contextWindow=${contextWindowTokens} threshold=${flushThreshold} ` +
       `isHeartbeat=${params.isHeartbeat} isCli=${isCli} memoryFlushWritable=${memoryFlushWritable} ` +
       `compactionCount=${entry?.compactionCount ?? 0} memoryFlushCompactionCount=${entry?.memoryFlushCompactionCount ?? "undefined"} ` +
+      `memoryFlushTurnCount=${turnsSinceLastFlush} periodicTurnInterval=${memoryFlushSettings.periodicTurnInterval} periodicMinutes=${memoryFlushSettings.periodicMinutes} ` +
       `persistedPromptTokens=${persistedPromptTokens ?? "undefined"} persistedFresh=${entry?.totalTokensFresh === true} ` +
       `promptTokensEst=${promptTokenEstimate ?? "undefined"} transcriptPromptTokens=${transcriptPromptTokens ?? "undefined"} transcriptOutputTokens=${transcriptOutputTokens ?? "undefined"} ` +
       `projectedTokenCount=${projectedTokenCount ?? "undefined"} transcriptBytes=${transcriptByteSize ?? "undefined"} ` +
@@ -436,6 +456,9 @@ export async function runMemoryFlushIfNeeded(params: {
         contextWindowTokens,
         reserveTokensFloor: memoryFlushSettings.reserveTokensFloor,
         softThresholdTokens: memoryFlushSettings.softThresholdTokens,
+        periodicTurnInterval: memoryFlushSettings.periodicTurnInterval,
+        periodicMinutes: memoryFlushSettings.periodicMinutes,
+        nowMs,
       })) ||
     shouldForceFlushByTranscriptSize;
 
@@ -523,6 +546,7 @@ export async function runMemoryFlushIfNeeded(params: {
           update: async () => ({
             memoryFlushAt: Date.now(),
             memoryFlushCompactionCount,
+            memoryFlushTurnCount: 0,
           }),
         });
         if (updatedEntry) {

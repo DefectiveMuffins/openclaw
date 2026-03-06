@@ -26,7 +26,7 @@ import { isGatewayCliClient, isWebchatClient } from "../../../utils/message-chan
 import { resolveRuntimeServiceVersion } from "../../../version.js";
 import type { AuthRateLimiter } from "../../auth-rate-limit.js";
 import type { GatewayAuthResult, ResolvedGatewayAuth } from "../../auth.js";
-import { isLocalDirectRequest } from "../../auth.js";
+import { isLocalDirectRequest, isPrivateNetworkDirectRequest } from "../../auth.js";
 import {
   buildCanvasScopedHostUrl,
   CANVAS_CAPABILITY_TTL_MS,
@@ -322,6 +322,11 @@ export function attachGatewayWsMessageHandler(params: {
   const hasUntrustedProxyHeaders = hasProxyHeaders && !remoteIsTrustedProxy;
   const hostIsLocalish = isLocalishHost(requestHost);
   const isLocalClient = isLocalDirectRequest(upgradeReq, trustedProxies, allowRealIpFallback);
+  const isPrivateNetworkDirectClient = isPrivateNetworkDirectRequest(
+    upgradeReq,
+    trustedProxies,
+    allowRealIpFallback,
+  );
   const reportedClientIp =
     isLocalClient || hasUntrustedProxyHeaders
       ? undefined
@@ -496,6 +501,8 @@ export function attachGatewayWsMessageHandler(params: {
 
         const isControlUi = connectParams.client.id === GATEWAY_CLIENT_IDS.CONTROL_UI;
         const isWebchat = isWebchatConnect(connectParams);
+        const allowLocalNetworkControlUiBypass =
+          isControlUi && role === "operator" && isPrivateNetworkDirectClient;
         if (enforceOriginCheckForAnyClient || isControlUi || isWebchat) {
           const hostHeaderOriginFallbackEnabled =
             configSnapshot.gateway?.controlUi?.dangerouslyAllowHostHeaderOriginFallback === true;
@@ -505,6 +512,7 @@ export function attachGatewayWsMessageHandler(params: {
             allowedOrigins: configSnapshot.gateway?.controlUi?.allowedOrigins,
             allowHostHeaderOriginFallback: hostHeaderOriginFallbackEnabled,
             isLocalClient,
+            isPrivateNetworkClient: allowLocalNetworkControlUiBypass,
           });
           if (!originCheck.ok) {
             const errorMessage =
@@ -561,6 +569,12 @@ export function attachGatewayWsMessageHandler(params: {
           rateLimiter: authRateLimiter,
           clientIp: browserRateLimitClientIp,
         });
+        if (allowLocalNetworkControlUiBypass) {
+          authResult = { ok: true, method: "none" };
+          authOk = true;
+          authMethod = "none";
+          sharedAuthOk = true;
+        }
         const rejectUnauthorized = (failedAuth: GatewayAuthResult) => {
           markHandshakeFailure("unauthorized", {
             authMode: resolvedAuth.mode,
@@ -621,6 +635,7 @@ export function attachGatewayWsMessageHandler(params: {
             isControlUi,
             controlUiAuthPolicy,
             trustedProxyAuthOk,
+            localNetworkBypass: allowLocalNetworkControlUiBypass,
             sharedAuthOk,
             authOk,
             hasSharedAuth,
@@ -760,7 +775,13 @@ export function attachGatewayWsMessageHandler(params: {
             hasBrowserOriginHeader,
             sharedAuthOk,
             authMethod,
-          }) || shouldSkipControlUiPairing(controlUiAuthPolicy, sharedAuthOk, trustedProxyAuthOk);
+          }) ||
+          shouldSkipControlUiPairing(
+            controlUiAuthPolicy,
+            sharedAuthOk,
+            trustedProxyAuthOk,
+            allowLocalNetworkControlUiBypass,
+          );
         if (device && devicePublicKey && !skipPairing) {
           const formatAuditList = (items: string[] | undefined): string => {
             if (!items || items.length === 0) {

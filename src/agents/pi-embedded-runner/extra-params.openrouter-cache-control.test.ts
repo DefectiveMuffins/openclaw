@@ -47,6 +47,31 @@ describe("extra-params: OpenRouter Anthropic cache_control", () => {
     expect(payload.messages[1].content).toBe("Hello");
   });
 
+  it("splits string system prompts at volatile runtime sections for better cache prefix hits", () => {
+    const payload = {
+      messages: [
+        {
+          role: "system",
+          content:
+            "Stable heading\n\n## Tooling\nUse tools.\n\n## Runtime\nRuntime: agent=main | model=x\nReasoning: off",
+        },
+      ],
+    };
+
+    runOpenRouterPayload(payload, "anthropic/claude-opus-4-6");
+
+    const content = payload.messages[0].content as Array<Record<string, unknown>>;
+    expect(content).toHaveLength(2);
+    expect(content[0]).toEqual({
+      type: "text",
+      text: "Stable heading\n\n## Tooling\nUse tools.",
+    });
+    expect(content[1]).toEqual({
+      type: "text",
+      text: "## Runtime\nRuntime: agent=main | model=x\nReasoning: off",
+      cache_control: { type: "ephemeral" },
+    });
+  });
   it("adds cache_control to last content block when system message is already array", () => {
     const payload = {
       messages: [
@@ -91,3 +116,4 @@ describe("extra-params: OpenRouter Anthropic cache_control", () => {
     expect(payload.messages[0].content).toBe("Hello");
   });
 });
+

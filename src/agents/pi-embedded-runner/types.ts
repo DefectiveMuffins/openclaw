@@ -28,6 +28,13 @@ export type EmbeddedPiAgentMeta = {
     cacheWrite?: number;
     total?: number;
   };
+  routing?: {
+    phase?: "planner" | "retrieval" | "compression" | "subagent" | "synthesis" | "verification";
+    cheapPath?: boolean;
+    escalated?: boolean;
+    cheapPassIndex?: number;
+    evidenceConfidence?: number;
+  };
 };
 
 export type EmbeddedPiRunMeta = {

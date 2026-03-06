@@ -113,6 +113,71 @@ export function formatThinkingLevels(
   return listThinkingLevelLabels(provider, model).join(separator);
 }
 
+
+const SIMPLE_ADAPTIVE_TEXT_RE =
+  /^(hi|hello|hey|yo|sup|ping|status\??|thanks|thank you|ok|okay|cool|nice)\s*[!.?]*$/i;
+const ADAPTIVE_HIGH_COMPLEXITY_RE =
+  /\b(why|design|architect(?:ure)?|tradeoff|root cause|optimi[sz](?:e|ation)|performance|race condition|deadlock|concurrency|scalability)\b/i;
+const ADAPTIVE_MEDIUM_DEBUG_RE = /\b(debug|error|failing|failure|regression|trace|stack|test)\b/i;
+const ADAPTIVE_LOW_EDIT_RE =
+  /\b(edit|change|update|fix|rename|config|configure|setting|toggle|enable|disable)\b/i;
+const ADAPTIVE_CODE_SIGNAL_RE =
+  /[`{}()[\];=<>]|[A-Za-z0-9_.\\/-]+\.(?:ts|tsx|js|jsx|json|md|ya?ml|py|go|rs|java|swift|kt|sh)\b/;
+const ADAPTIVE_FILE_REF_RE =
+  /(?:^|[\s(])([A-Za-z0-9_.\\/-]+\.(?:ts|tsx|js|jsx|json|md|ya?ml|py|go|rs|java|swift|kt|sh))/g;
+
+function countAdaptiveFileRefs(text: string): number {
+  const unique = new Set<string>();
+  for (const match of text.matchAll(ADAPTIVE_FILE_REF_RE)) {
+    const value = match[1]?.trim();
+    if (value) {
+      unique.add(value.toLowerCase());
+    }
+  }
+  return unique.size;
+}
+
+export function resolveAdaptiveThinkLevel(
+  messageText: string,
+  recentHistory: string[] = [],
+): Exclude<ThinkLevel, "adaptive" | "xhigh"> {
+  const text = messageText.trim();
+  if (!text) {
+    return "minimal";
+  }
+
+  const historyText = recentHistory.join("\n");
+  const combined = `${text}\n${historyText}`;
+  const lower = text.toLowerCase();
+
+  if (text.length < 50 && SIMPLE_ADAPTIVE_TEXT_RE.test(text) && !ADAPTIVE_CODE_SIGNAL_RE.test(text)) {
+    return /\bstatus\b/i.test(text) ? "minimal" : "off";
+  }
+
+  if (ADAPTIVE_HIGH_COMPLEXITY_RE.test(combined)) {
+    return "high";
+  }
+
+  const fileRefs = countAdaptiveFileRefs(combined);
+  if (fileRefs >= 2) {
+    return "medium";
+  }
+
+  if (ADAPTIVE_LOW_EDIT_RE.test(lower) && fileRefs <= 1 && !ADAPTIVE_MEDIUM_DEBUG_RE.test(lower)) {
+    return "low";
+  }
+
+  if (ADAPTIVE_MEDIUM_DEBUG_RE.test(combined) || ADAPTIVE_CODE_SIGNAL_RE.test(text)) {
+    return "medium";
+  }
+
+  if (text.length < 50) {
+    return "minimal";
+  }
+
+  return "medium";
+}
+
 export function formatXHighModelHint(): string {
   const refs = [...XHIGH_MODEL_REFS] as string[];
   if (refs.length === 0) {

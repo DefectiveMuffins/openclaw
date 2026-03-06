@@ -1,4 +1,8 @@
-import type { SessionSystemPromptReport } from "../config/sessions/types.js";
+import type {
+  SessionAgentRoutingSummary,
+  SessionAgenticCounters,
+  SessionSystemPromptReport,
+} from "../config/sessions/types.js";
 import type {
   CostUsageSummary,
   SessionCostSummary,
@@ -32,6 +36,8 @@ export type SessionUsageEntry = {
   providerOverride?: string;
   modelProvider?: string;
   model?: string;
+  routing?: SessionAgentRoutingSummary | null;
+  agenticCounters?: SessionAgenticCounters | null;
   usage: SessionCostSummary | null;
   contextWeight?: SessionSystemPromptReport | null;
 };

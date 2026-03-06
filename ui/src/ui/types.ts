@@ -328,6 +328,14 @@ export type AgentsListResult = {
   scope: string;
   agents: GatewayAgentRow[];
 };
+export type GatewayModelChoice = {
+  id: string;
+  name: string;
+  provider: string;
+  contextWindow?: number;
+  reasoning?: boolean;
+  input?: Array<"text" | "image" | "document">;
+};
 
 export type ToolCatalogProfile = {
   id: "minimal" | "coding" | "messaging" | "full";
@@ -625,3 +633,4 @@ export type LogEntry = {
   message?: string | null;
   meta?: Record<string, unknown> | null;
 };
+

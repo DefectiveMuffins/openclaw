@@ -21,6 +21,11 @@ import {
   evaluateContextWindowGuard,
   resolveContextWindowInfo,
 } from "../context-window-guard.js";
+import {
+  getDelegationTracking,
+  resetDelegationTracking,
+  shouldForceTopLevelDelegation,
+} from "../delegation-enforcement.js";
 import { DEFAULT_CONTEXT_TOKENS, DEFAULT_MODEL, DEFAULT_PROVIDER } from "../defaults.js";
 import { FailoverError, resolveFailoverStatus } from "../failover-error.js";
 import {
@@ -29,7 +34,12 @@ import {
   resolveAuthProfileOrder,
   type ResolvedProviderAuth,
 } from "../model-auth.js";
-import { normalizeProviderId } from "../model-selection.js";
+import {
+  normalizeProviderId,
+  parseModelRef,
+  resolvePhaseAwareThinkLevel,
+  resolveStageAwareModelSelection,
+} from "../model-selection.js";
 import { ensureOpenClawModelsJson } from "../models-config.js";
 import {
   formatBillingErrorMessage,
@@ -123,6 +133,10 @@ const BASE_RUN_RETRY_ITERATIONS = 24;
 const RUN_RETRY_ITERATIONS_PER_PROFILE = 8;
 const MIN_RUN_RETRY_ITERATIONS = 32;
 const MAX_RUN_RETRY_ITERATIONS = 160;
+const MAX_DELEGATION_RETRY_ATTEMPTS = 2;
+
+const DELEGATION_RETRY_SYSTEM_PROMPT =
+  "Runtime enforcement: this top-level requester session must delegate the user's work to at least one subagent via sessions_spawn before any final answer. If you answered directly, correct course now: spawn a subagent, wait for its result, then synthesize.";
 
 function resolveMaxRunRetryIterations(profileCandidateCount: number): number {
   const scaled =
@@ -241,6 +255,23 @@ export async function runEmbeddedPiAgent(
 
       let provider = (params.provider ?? DEFAULT_PROVIDER).trim() || DEFAULT_PROVIDER;
       let modelId = (params.model ?? DEFAULT_MODEL).trim() || DEFAULT_MODEL;
+      const modelPhase = params.modelPhase ?? "synthesis";
+      const stageAwareModel =
+        params.config && modelPhase !== "synthesis"
+          ? resolveStageAwareModelSelection({
+              cfg: params.config,
+              phase: modelPhase,
+              evidenceConfidence: params.evidenceConfidence,
+              cheapPassIndex: params.cheapPassIndex,
+            })
+          : undefined;
+      if (stageAwareModel) {
+        const routedRef = parseModelRef(stageAwareModel, provider);
+        if (routedRef) {
+          provider = routedRef.provider;
+          modelId = routedRef.model;
+        }
+      }
       const agentDir = params.agentDir ?? resolveOpenClawAgentDir();
       const fallbackConfigured = hasConfiguredModelFallbacks({
         cfg: params.config,
@@ -267,7 +298,13 @@ export async function runEmbeddedPiAgent(
       if (hookRunner?.hasHooks("before_model_resolve")) {
         try {
           modelResolveOverride = await hookRunner.runBeforeModelResolve(
-            { prompt: params.prompt },
+            {
+              prompt: params.prompt,
+              phase: modelPhase,
+              taskType: params.taskType,
+              estimatedComplexity: params.estimatedComplexity,
+              readOnly: params.readOnly,
+            },
             hookCtx,
           );
         } catch (hookErr) {
@@ -371,7 +408,13 @@ export async function runEmbeddedPiAgent(
           : [undefined];
       let profileIndex = 0;
 
-      const initialThinkLevel = params.thinkLevel ?? "off";
+      const initialThinkLevel =
+        resolvePhaseAwareThinkLevel({
+          phase: modelPhase,
+          thinkLevel: params.thinkLevel,
+        }) ??
+        params.thinkLevel ??
+        "off";
       let thinkLevel = initialThinkLevel;
       const attemptedThinking = new Set<ThinkLevel>();
       let apiKeyInfo: ApiKeyInfo | null = null;
@@ -653,6 +696,12 @@ export async function runEmbeddedPiAgent(
       let lastRunPromptUsage: ReturnType<typeof normalizeUsage> | undefined;
       let autoCompactionCount = 0;
       let runLoopIterations = 0;
+      let delegationRetryAttempts = 0;
+      const delegationRequired = shouldForceTopLevelDelegation(params.sessionKey);
+      resetDelegationTracking({
+        sessionKey: params.sessionKey,
+        sessionId: params.sessionId,
+      });
       const maybeMarkAuthProfileFailure = async (failure: {
         profileId?: string;
         reason?: Parameters<typeof markAuthProfileFailure>[0]["reason"] | null;
@@ -711,6 +760,12 @@ export async function runEmbeddedPiAgent(
 
           const prompt =
             provider === "anthropic" ? scrubAnthropicRefusalMagic(params.prompt) : params.prompt;
+          const effectiveExtraSystemPrompt =
+            delegationRequired && delegationRetryAttempts > 0
+              ? [params.extraSystemPrompt, DELEGATION_RETRY_SYSTEM_PROMPT]
+                  .filter((value): value is string => Boolean(value?.trim()))
+                  .join("\n\n")
+              : params.extraSystemPrompt;
 
           const attempt = await runEmbeddedAttempt({
             sessionId: params.sessionId,
@@ -766,7 +821,7 @@ export async function runEmbeddedPiAgent(
             onReasoningEnd: params.onReasoningEnd,
             onToolResult: params.onToolResult,
             onAgentEvent: params.onAgentEvent,
-            extraSystemPrompt: params.extraSystemPrompt,
+            extraSystemPrompt: effectiveExtraSystemPrompt,
             inputProvenance: params.inputProvenance,
             streamParams: params.streamParams,
             ownerNumbers: params.ownerNumbers,
@@ -795,6 +850,50 @@ export async function runEmbeddedPiAgent(
             provider,
             model: modelId,
           });
+          const delegationState = delegationRequired
+            ? getDelegationTracking({
+                sessionKey: params.sessionKey,
+                sessionId: params.sessionId,
+              })
+            : { spawnedSubagentCount: 0, childSessionKeys: [] };
+          if (
+            delegationRequired &&
+            delegationState.spawnedSubagentCount <= 0 &&
+            !promptError &&
+            !aborted &&
+            !timedOut
+          ) {
+            if (delegationRetryAttempts < MAX_DELEGATION_RETRY_ATTEMPTS) {
+              delegationRetryAttempts += 1;
+              log.warn(
+                `[delegation-enforcement] sessionKey=${params.sessionKey ?? params.sessionId} ` +
+                  `provider=${provider}/${modelId} retry=${delegationRetryAttempts} ` +
+                  `reason=no_subagent_spawn`,
+              );
+              continue;
+            }
+            return {
+              payloads: [
+                {
+                  text:
+                    "Request failed because the top-level agent did not delegate to a subagent as required. Please try again.",
+                  isError: true,
+                },
+              ],
+              meta: {
+                durationMs: Date.now() - started,
+                agentMeta: {
+                  sessionId: params.sessionId,
+                  provider,
+                  model: model.id,
+                },
+                error: {
+                  kind: "retry_limit",
+                  message: "Top-level delegation enforcement failed after repeated retries.",
+                },
+              },
+            };
+          }
           const formattedAssistantErrorText = lastAssistant
             ? formatAssistantErrorText(lastAssistant, {
                 cfg: params.config,
@@ -1222,6 +1321,19 @@ export async function runEmbeddedPiAgent(
             lastCallUsage: lastCallUsage ?? undefined,
             promptTokens,
             compactionCount: autoCompactionCount > 0 ? autoCompactionCount : undefined,
+            routing:
+              modelPhase !== "synthesis" || stageAwareModel || params.cheapPassIndex !== undefined
+                ? {
+                    phase: modelPhase,
+                    cheapPath: Boolean(stageAwareModel),
+                    escalated:
+                      modelPhase !== "synthesis" &&
+                      Boolean(params.config?.agents?.defaults?.modelRouting?.enabled) &&
+                      !stageAwareModel,
+                    cheapPassIndex: params.cheapPassIndex,
+                    evidenceConfidence: params.evidenceConfidence,
+                  }
+                : undefined,
           };
 
           const payloads = buildEmbeddedRunPayloads({
@@ -1317,3 +1429,4 @@ export async function runEmbeddedPiAgent(
     }),
   );
 }
+

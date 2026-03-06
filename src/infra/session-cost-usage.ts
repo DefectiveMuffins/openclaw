@@ -20,6 +20,7 @@ import type {
   DiscoveredSession,
   ParsedTranscriptEntry,
   ParsedUsageEntry,
+  SessionAgenticSummary,
   SessionCostSummary,
   SessionDailyLatency,
   SessionDailyMessageCounts,
@@ -39,6 +40,7 @@ export type {
   CostUsageSummary,
   CostUsageTotals,
   DiscoveredSession,
+  SessionAgenticSummary,
   SessionCostSummary,
   SessionDailyLatency,
   SessionDailyMessageCounts,
@@ -166,6 +168,290 @@ const parseTranscriptEntry = (entry: Record<string, unknown>): ParsedTranscriptE
 const formatDayKey = (date: Date): string =>
   date.toLocaleDateString("en-CA", { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
 
+const TOOL_RESULT_MESSAGE_ROLES = new Set(["tool", "toolResult"]);
+const TOOL_RESULT_BLOCK_TYPES = new Set(["tool_result", "tool_result_error"]);
+
+type SessionAgenticAccumulator = {
+  memorySearch?: NonNullable<SessionAgenticSummary["memorySearch"]>;
+  delegation?: {
+    spawnCalls: number;
+    accepted: number;
+    structuredResponses: number;
+    readOnlySpawns: number;
+    roleCounts: Map<string, number>;
+    modelsApplied: Set<string>;
+  };
+};
+
+function normalizeStringValue(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function normalizeToolBlockType(value: unknown): string {
+  return normalizeStringValue(value)?.toLowerCase() ?? "";
+}
+
+function extractStructuredText(value: unknown): string[] {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? [trimmed] : [];
+  }
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const parts: string[] = [];
+  for (const entry of value) {
+    if (typeof entry === "string") {
+      const trimmed = entry.trim();
+      if (trimmed) {
+        parts.push(trimmed);
+      }
+      continue;
+    }
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const block = entry as Record<string, unknown>;
+    const directText = normalizeStringValue(block.text);
+    if (directText) {
+      parts.push(directText);
+    }
+    const directContent = block.content;
+    if (typeof directContent === "string" || Array.isArray(directContent)) {
+      parts.push(...extractStructuredText(directContent));
+    }
+  }
+  return parts;
+}
+
+function extractToolName(message: Record<string, unknown>): string | undefined {
+  const direct =
+    normalizeStringValue(message.toolName) ??
+    normalizeStringValue(message.tool_name) ??
+    normalizeStringValue(message.name) ??
+    normalizeStringValue(message.tool);
+  if (direct) {
+    return direct;
+  }
+  const content = message.content;
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+  for (const entry of content) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const block = entry as Record<string, unknown>;
+    const type = normalizeToolBlockType(block.type);
+    if (type === "tool_use") {
+      return normalizeStringValue(block.name);
+    }
+  }
+  return undefined;
+}
+
+function maybeParseJsonPayload(text: string): unknown {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const objectStart = trimmed.indexOf("{");
+  const arrayStart = trimmed.indexOf("[");
+  const starts = [objectStart, arrayStart].filter((idx) => idx >= 0);
+  const start = starts.length > 0 ? Math.min(...starts) : 0;
+  const candidate = start > 0 ? trimmed.slice(start) : trimmed;
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    return undefined;
+  }
+}
+
+function inferToolNameFromPayload(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object") {
+    return undefined;
+  }
+  const record = payload as Record<string, unknown>;
+  if (
+    (Array.isArray(record.results) || record.plan || record.workingSet || record.confidence) &&
+    (record.plan || record.confidence)
+  ) {
+    return "memory_search";
+  }
+  if (record.childSessionKey && record.runId && record.status) {
+    return "sessions_spawn";
+  }
+  return undefined;
+}
+
+function collectToolPayloadsFromMessage(message: Record<string, unknown>): Array<{
+  toolName?: string;
+  payload: unknown;
+}> {
+  const payloads: Array<{ toolName?: string; payload: unknown }> = [];
+  const role = normalizeStringValue(message.role);
+  if (role && TOOL_RESULT_MESSAGE_ROLES.has(role)) {
+    const payload = maybeParseJsonPayload(extractStructuredText(message.content).join("\n"));
+    if (payload !== undefined) {
+      payloads.push({
+        toolName: extractToolName(message) ?? inferToolNameFromPayload(payload),
+        payload,
+      });
+    }
+  }
+  const content = message.content;
+  if (!Array.isArray(content)) {
+    return payloads;
+  }
+  for (const entry of content) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const block = entry as Record<string, unknown>;
+    const type = normalizeToolBlockType(block.type);
+    if (!TOOL_RESULT_BLOCK_TYPES.has(type)) {
+      continue;
+    }
+    const payload = maybeParseJsonPayload(extractStructuredText(block.content ?? block.text).join("\n"));
+    if (payload === undefined) {
+      continue;
+    }
+    payloads.push({
+      toolName:
+        normalizeStringValue(block.toolName) ??
+        normalizeStringValue(block.tool_name) ??
+        normalizeStringValue(block.name) ??
+        inferToolNameFromPayload(payload),
+      payload,
+    });
+  }
+  return payloads;
+}
+
+function updateMemorySearchSummary(
+  accumulator: SessionAgenticAccumulator,
+  payload: Record<string, unknown>,
+): void {
+  const summary = accumulator.memorySearch ?? { calls: 0, workingSetHits: 0, hitCalls: 0 };
+  summary.calls += 1;
+  const plan = payload.plan as Record<string, unknown> | undefined;
+  const confidence = payload.confidence as Record<string, unknown> | undefined;
+  const workingSet = payload.workingSet as Record<string, unknown> | undefined;
+  summary.lastIntent = normalizeStringValue(plan?.intent) ?? summary.lastIntent;
+  summary.lastStrategy = normalizeStringValue(plan?.strategy) ?? summary.lastStrategy;
+  summary.lastSourceBias = normalizeStringValue(plan?.sourceBias) ?? summary.lastSourceBias;
+  if (Array.isArray(plan?.queries)) {
+    summary.lastQueryCount = plan.queries.filter((query) => normalizeStringValue(query)).length;
+  }
+  summary.lastProvider = normalizeStringValue(payload.provider) ?? summary.lastProvider;
+  summary.lastModel = normalizeStringValue(payload.model) ?? summary.lastModel;
+  const confidenceScore = toFiniteNumber(confidence?.score);
+  if (confidenceScore !== undefined) {
+    summary.lastConfidenceScore = confidenceScore;
+  }
+  summary.lastConfidenceLevel =
+    normalizeStringValue(confidence?.level) ?? summary.lastConfidenceLevel;
+  if (typeof workingSet?.enabled === "boolean") {
+    summary.workingSetEnabled = workingSet.enabled;
+  }
+  const workingSetHits = toFiniteNumber(workingSet?.hits);
+  if (workingSetHits !== undefined) {
+    const normalizedHits = Math.max(0, Math.floor(workingSetHits));
+    summary.workingSetHits += normalizedHits;
+    summary.lastWorkingSetHits = normalizedHits;
+    if (normalizedHits > 0) {
+      summary.hitCalls += 1;
+    }
+  }
+  if (typeof payload.transientOnly === "boolean") {
+    summary.transientOnly = payload.transientOnly;
+  }
+  accumulator.memorySearch = summary;
+}
+
+function updateDelegationSummary(
+  accumulator: SessionAgenticAccumulator,
+  payload: Record<string, unknown>,
+): void {
+  const summary =
+    accumulator.delegation ??
+    {
+      spawnCalls: 0,
+      accepted: 0,
+      structuredResponses: 0,
+      readOnlySpawns: 0,
+      roleCounts: new Map<string, number>(),
+      modelsApplied: new Set<string>(),
+    };
+  summary.spawnCalls += 1;
+  if (normalizeStringValue(payload.status) === "accepted") {
+    summary.accepted += 1;
+  }
+  const delegation = payload.delegation as Record<string, unknown> | undefined;
+  const role = normalizeStringValue(delegation?.role);
+  if (role) {
+    summary.roleCounts.set(role, (summary.roleCounts.get(role) ?? 0) + 1);
+  }
+  if (normalizeStringValue(delegation?.responseFormat) === "structured") {
+    summary.structuredResponses += 1;
+  }
+  if (delegation?.readOnly === true) {
+    summary.readOnlySpawns += 1;
+  }
+  const modelApplied = normalizeStringValue(payload.modelApplied);
+  if (modelApplied) {
+    summary.modelsApplied.add(modelApplied);
+  }
+  accumulator.delegation = summary;
+}
+
+function collectSessionAgenticActivity(
+  accumulator: SessionAgenticAccumulator,
+  record: Record<string, unknown>,
+): void {
+  const message = record.message as Record<string, unknown> | undefined;
+  if (!message || typeof message !== "object") {
+    return;
+  }
+  for (const { toolName, payload } of collectToolPayloadsFromMessage(message)) {
+    if (!payload || typeof payload !== "object") {
+      continue;
+    }
+    const resolvedToolName = toolName ?? inferToolNameFromPayload(payload);
+    if (resolvedToolName === "memory_search") {
+      updateMemorySearchSummary(accumulator, payload as Record<string, unknown>);
+    } else if (resolvedToolName === "sessions_spawn") {
+      updateDelegationSummary(accumulator, payload as Record<string, unknown>);
+    }
+  }
+}
+
+function finalizeSessionAgenticSummary(
+  accumulator: SessionAgenticAccumulator,
+): SessionAgenticSummary | undefined {
+  const summary: SessionAgenticSummary = {};
+  if (accumulator.memorySearch?.calls) {
+    summary.memorySearch = accumulator.memorySearch;
+  }
+  if (accumulator.delegation?.spawnCalls) {
+    summary.delegation = {
+      spawnCalls: accumulator.delegation.spawnCalls,
+      accepted: accumulator.delegation.accepted,
+      structuredResponses: accumulator.delegation.structuredResponses,
+      readOnlySpawns: accumulator.delegation.readOnlySpawns,
+      roles: Array.from(accumulator.delegation.roleCounts.entries())
+        .map(([role, count]) => ({ role, count }))
+        .toSorted((a, b) => b.count - a.count || a.role.localeCompare(b.role)),
+      modelsApplied: Array.from(accumulator.delegation.modelsApplied).toSorted(),
+    };
+  }
+  return summary.memorySearch || summary.delegation ? summary : undefined;
+}
+
 const computeLatencyStats = (values: number[]): SessionLatencyStats | undefined => {
   if (!values.length) {
     return undefined;
@@ -243,8 +529,10 @@ async function scanTranscriptFile(params: {
   filePath: string;
   config?: OpenClawConfig;
   onEntry: (entry: ParsedTranscriptEntry) => void;
+  onRawRecord?: (record: Record<string, unknown>) => void;
 }): Promise<void> {
   for await (const parsed of readJsonlRecords(params.filePath)) {
+    params.onRawRecord?.(parsed);
     const entry = parseTranscriptEntry(parsed);
     if (!entry) {
       continue;
@@ -499,12 +787,16 @@ export async function loadSessionCostSummary(params: {
   const modelUsageMap = new Map<string, SessionModelUsage>();
   const errorStopReasons = new Set(["error", "aborted", "timeout"]);
   const latencyValues: number[] = [];
+  const agenticAccumulator: SessionAgenticAccumulator = {};
   let lastUserTimestamp: number | undefined;
   const MAX_LATENCY_MS = 12 * 60 * 60 * 1000;
 
   await scanTranscriptFile({
     filePath: sessionFile,
     config: params.config,
+    onRawRecord: (record) => {
+      collectSessionAgenticActivity(agenticAccumulator, record);
+    },
     onEntry: (entry) => {
       const ts = entry.timestamp?.getTime();
 
@@ -733,6 +1025,7 @@ export async function loadSessionCostSummary(params: {
     toolUsage,
     modelUsage,
     latency: computeLatencyStats(latencyValues),
+    agentic: finalizeSessionAgenticSummary(agenticAccumulator),
     ...totals,
   };
 }

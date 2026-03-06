@@ -24,6 +24,7 @@ import {
 } from "./usage-query.ts";
 import { renderEmptyDetailState, renderSessionDetailPanel } from "./usage-render-details.ts";
 import {
+  buildUsageAgenticOverviewStats,
   renderCostBreakdownCompact,
   renderDailyChartCompact,
   renderFilterChips,
@@ -300,6 +301,7 @@ export function renderUsage(props: UsageProps) {
           ? dayFilteredSessions
           : sortedSessions;
   const activeAggregates = buildAggregatesFromSessions(aggregateSessions, props.aggregates);
+  const agenticOverview = buildUsageAgenticOverviewStats(aggregateSessions);
 
   // Filter daily chart data if sessions are selected
   const filteredDaily =
@@ -748,6 +750,7 @@ export function renderUsage(props: UsageProps) {
       displayTotals,
       activeAggregates,
       insightStats,
+      agenticOverview,
       hasMissingCost,
       buildPeakErrorHours(aggregateSessions, props.timeZone),
       displaySessionCount,

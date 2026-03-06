@@ -6,14 +6,28 @@ import { getMemorySearchManager } from "../../memory/index.js";
 import type { MemorySearchResult } from "../../memory/types.js";
 import { parseAgentSessionKey } from "../../routing/session-key.js";
 import { resolveSessionAgentId } from "../agent-scope.js";
+import {
+  estimateMemorySearchConfidence,
+  packMemorySearchResults,
+  resolveMemorySearchPlan,
+  type MemorySearchSourceBias,
+  type MemorySearchStrategy,
+} from "../memory-search-routing.js";
 import { resolveMemorySearchConfig } from "../memory-search.js";
+import { optionalStringEnum } from "../schema/typebox.js";
+import { searchWorkingSet } from "../tool-working-set.js";
 import type { AnyAgentTool } from "./common.js";
 import { jsonResult, readNumberParam, readStringParam } from "./common.js";
+
+const MEMORY_SEARCH_STRATEGIES = ["auto", "fast", "deep"] as const;
+const MEMORY_SEARCH_SOURCE_BIASES = ["balanced", "memory", "sessions", "working-set"] as const;
 
 const MemorySearchSchema = Type.Object({
   query: Type.String(),
   maxResults: Type.Optional(Type.Number()),
   minScore: Type.Optional(Type.Number()),
+  strategy: Type.Optional(optionalStringEnum(MEMORY_SEARCH_STRATEGIES)),
+  sourceBias: Type.Optional(optionalStringEnum(MEMORY_SEARCH_SOURCE_BIASES)),
 });
 
 const MemoryGetSchema = Type.Object({
@@ -37,6 +51,109 @@ function resolveMemoryToolContext(options: { config?: OpenClawConfig; agentSessi
   return { cfg, agentId };
 }
 
+function makeResultKey(entry: MemorySearchResult): string {
+  return `${entry.source}:${entry.path}:${entry.startLine}:${entry.endLine}:${entry.snippet.trim()}`;
+}
+
+function applySourceBias(entry: MemorySearchResult, sourceBias: MemorySearchSourceBias): number {
+  if (sourceBias === "memory" && entry.source === "memory") {
+    return 0.08;
+  }
+  if (sourceBias === "sessions" && entry.source === "sessions") {
+    return 0.08;
+  }
+  if (sourceBias === "working-set" && entry.source === "working-set") {
+    return 0.1;
+  }
+  return 0;
+}
+
+function mergeAndRankResults(params: {
+  resultSets: MemorySearchResult[][];
+  sourceBias: MemorySearchSourceBias;
+}): MemorySearchResult[] {
+  const deduped = new Map<string, MemorySearchResult>();
+  for (const resultSet of params.resultSets) {
+    for (const entry of resultSet) {
+      const key = makeResultKey(entry);
+      const candidate = { ...entry, score: Math.min(1, entry.score + applySourceBias(entry, params.sourceBias)) };
+      const existing = deduped.get(key);
+      if (!existing || candidate.score > existing.score) {
+        deduped.set(key, candidate);
+      }
+    }
+  }
+  return [...deduped.values()].sort((a, b) => b.score - a.score);
+}
+
+function resolveConfidenceLevel(score: number): "low" | "medium" | "high" {
+  if (score >= 0.75) {
+    return "high";
+  }
+  if (score >= 0.45) {
+    return "medium";
+  }
+  return "low";
+}
+
+async function searchPersistentMemory(params: {
+  cfg: OpenClawConfig;
+  agentId: string;
+  queryPlan: ReturnType<typeof resolveMemorySearchPlan>;
+  requestedMaxResults: number;
+  requestedMinScore: number;
+  sessionKey?: string;
+}): Promise<{
+  results: MemorySearchResult[];
+  provider?: string;
+  model?: string;
+  fallback?: unknown;
+  mode?: string;
+  error?: string;
+}> {
+  const { manager, error } = await getMemorySearchManager({
+    cfg: params.cfg,
+    agentId: params.agentId,
+  });
+  if (!manager) {
+    return { results: [], error };
+  }
+
+  try {
+    const resultSets = await Promise.all(
+      params.queryPlan.queries.map((query) =>
+        manager.search(query, {
+          maxResults: params.queryPlan.maxResults,
+          minScore: params.queryPlan.minScore,
+          sessionKey: params.sessionKey,
+        }),
+      ),
+    );
+    const status = manager.status();
+    const mode = (status.custom as { searchMode?: string } | undefined)?.searchMode;
+    const merged = mergeAndRankResults({
+      resultSets,
+      sourceBias: params.queryPlan.sourceBias,
+    });
+    const packed = packMemorySearchResults({
+      results: merged,
+      maxResults: params.requestedMaxResults,
+    });
+    return {
+      results: packed,
+      provider: status.provider,
+      model: status.model,
+      fallback: status.fallback,
+      mode,
+    };
+  } catch (err) {
+    return {
+      results: [],
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 export function createMemorySearchTool(options: {
   config?: OpenClawConfig;
   agentSessionKey?: string;
@@ -54,46 +171,127 @@ export function createMemorySearchTool(options: {
     parameters: MemorySearchSchema,
     execute: async (_toolCallId, params) => {
       const query = readStringParam(params, "query", { required: true });
-      const maxResults = readNumberParam(params, "maxResults");
-      const minScore = readNumberParam(params, "minScore");
-      const { manager, error } = await getMemorySearchManager({
+      const requestedMaxResults = readNumberParam(params, "maxResults");
+      const requestedMinScore = readNumberParam(params, "minScore");
+      const requestedStrategy = readStringParam(params, "strategy") as MemorySearchStrategy | undefined;
+      const requestedSourceBias = readStringParam(params, "sourceBias") as
+        | MemorySearchSourceBias
+        | undefined;
+      const resolvedSearch = resolveMemorySearchConfig(cfg, agentId);
+      if (!resolvedSearch) {
+        return jsonResult(buildMemorySearchUnavailableResult(undefined));
+      }
+      const maxResults =
+        typeof requestedMaxResults === "number" && Number.isFinite(requestedMaxResults)
+          ? Math.max(1, Math.floor(requestedMaxResults))
+          : resolvedSearch.query.maxResults;
+      const minScore =
+        typeof requestedMinScore === "number" && Number.isFinite(requestedMinScore)
+          ? Math.max(0, Math.min(1, requestedMinScore))
+          : resolvedSearch.query.minScore;
+      const queryPlan = resolveMemorySearchPlan({
+        query,
+        requestedStrategy,
+        sourceBias: requestedSourceBias,
+        maxResults,
+        minScore,
+        routing: resolvedSearch.query.routing,
+        hasWorkingSet: resolvedSearch.workingSet.enabled,
+      });
+
+      const workingSetResults = searchWorkingSet({
+        sessionKey: options.agentSessionKey,
+        query,
+        maxResults: queryPlan.maxResults,
+        sourceBias: queryPlan.sourceBias,
+        config: resolvedSearch.workingSet,
+      });
+      const persistent = await searchPersistentMemory({
         cfg,
         agentId,
+        queryPlan,
+        requestedMaxResults: maxResults,
+        requestedMinScore: minScore,
+        sessionKey: options.agentSessionKey,
       });
-      if (!manager) {
-        return jsonResult(buildMemorySearchUnavailableResult(error));
-      }
-      try {
-        const citationsMode = resolveMemoryCitationsMode(cfg);
-        const includeCitations = shouldIncludeCitations({
-          mode: citationsMode,
-          sessionKey: options.agentSessionKey,
-        });
-        const rawResults = await manager.search(query, {
-          maxResults,
-          minScore,
-          sessionKey: options.agentSessionKey,
-        });
-        const status = manager.status();
-        const decorated = decorateCitations(rawResults, includeCitations);
-        const resolved = resolveMemoryBackendConfig({ cfg, agentId });
-        const results =
-          status.backend === "qmd"
-            ? clampResultsByInjectedChars(decorated, resolved.qmd?.limits.maxInjectedChars)
-            : decorated;
-        const searchMode = (status.custom as { searchMode?: string } | undefined)?.searchMode;
+
+      const merged = mergeAndRankResults({
+        resultSets: queryPlan.workingSetFirst
+          ? [workingSetResults, persistent.results]
+          : [persistent.results, workingSetResults],
+        sourceBias: queryPlan.sourceBias,
+      });
+
+      const citationsMode = resolveMemoryCitationsMode(cfg);
+      const includeCitations = shouldIncludeCitations({
+        mode: citationsMode,
+        sessionKey: options.agentSessionKey,
+      });
+      const resolved = resolveMemoryBackendConfig({ cfg, agentId });
+      const decorated = decorateCitations(
+        packMemorySearchResults({ results: merged, maxResults }),
+        includeCitations,
+      );
+      const results = clampResultsByInjectedChars(
+        decorated,
+        resolved.qmd?.limits.maxInjectedChars,
+      );
+      const confidenceScore = estimateMemorySearchConfidence(results);
+      const workingSetHits = results.filter((entry) => entry.source === "working-set").length;
+
+      if (results.length > 0) {
         return jsonResult({
           results,
-          provider: status.provider,
-          model: status.model,
-          fallback: status.fallback,
+          provider: persistent.provider ?? (workingSetHits > 0 ? "working-set" : undefined),
+          model: persistent.model,
+          fallback: persistent.fallback,
           citations: citationsMode,
-          mode: searchMode,
+          mode: persistent.mode,
+          plan: {
+            intent: queryPlan.intent,
+            strategy: queryPlan.strategy,
+            sourceBias: queryPlan.sourceBias,
+            queries: queryPlan.queries,
+          },
+          confidence: {
+            score: confidenceScore,
+            level: resolveConfidenceLevel(confidenceScore),
+          },
+          workingSet: {
+            enabled: resolvedSearch.workingSet.enabled,
+            hits: workingSetHits,
+          },
+          transientOnly: !persistent.provider && workingSetHits > 0,
+          ...(persistent.error ? { warning: persistent.error } : {}),
         });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return jsonResult(buildMemorySearchUnavailableResult(message));
       }
+
+      if (persistent.error) {
+        return jsonResult(buildMemorySearchUnavailableResult(persistent.error));
+      }
+
+      return jsonResult({
+        results: [],
+        provider: persistent.provider,
+        model: persistent.model,
+        fallback: persistent.fallback,
+        citations: citationsMode,
+        mode: persistent.mode,
+        plan: {
+          intent: queryPlan.intent,
+          strategy: queryPlan.strategy,
+          sourceBias: queryPlan.sourceBias,
+          queries: queryPlan.queries,
+        },
+        confidence: {
+          score: 0,
+          level: "low",
+        },
+        workingSet: {
+          enabled: resolvedSearch.workingSet.enabled,
+          hits: 0,
+        },
+      });
     },
   };
 }
@@ -221,7 +419,6 @@ function shouldIncludeCitations(params: {
   if (params.mode === "off") {
     return false;
   }
-  // auto: show citations in direct chats; suppress in groups/channels by default.
   const chatType = deriveChatTypeFromSessionKey(params.sessionKey);
   return chatType === "direct";
 }

@@ -3,7 +3,12 @@ import { scheduleChatScroll } from "./app-scroll.ts";
 import { setLastActiveSessionKey } from "./app-settings.ts";
 import { resetToolStream } from "./app-tool-stream.ts";
 import type { OpenClawApp } from "./app.ts";
-import { abortChatRun, loadChatHistory, sendChatMessage } from "./controllers/chat.ts";
+import {
+  abortChatRun,
+  loadChatHistory,
+  sendChatMessage,
+  type SendChatMessageOptions,
+} from "./controllers/chat.ts";
 import { loadSessions } from "./controllers/sessions.ts";
 import type { GatewayHelloOk } from "./gateway.ts";
 import { normalizeBasePath } from "./navigation.ts";
@@ -14,6 +19,10 @@ export type ChatHost = {
   connected: boolean;
   chatMessage: string;
   chatAttachments: ChatAttachment[];
+  chatMessages: unknown[];
+  chatToolMessages: unknown[];
+  chatStream: string | null;
+  chatStreamStartedAt: number | null;
   chatQueue: ChatQueueItem[];
   chatRunId: string | null;
   chatSending: boolean;
@@ -48,16 +57,19 @@ export function isChatStopCommand(text: string) {
   );
 }
 
+const CHAT_RESET_COMMAND_RE = /^\/(?:new|reset)(?:\s+([\s\S]*))?$/i;
+
 function isChatResetCommand(text: string) {
-  const trimmed = text.trim();
-  if (!trimmed) {
-    return false;
+  return CHAT_RESET_COMMAND_RE.test(text.trim());
+}
+
+function resolveOptimisticResetMessage(text: string): string | null {
+  const match = CHAT_RESET_COMMAND_RE.exec(text.trim());
+  if (!match) {
+    return null;
   }
-  const normalized = trimmed.toLowerCase();
-  if (normalized === "/new" || normalized === "/reset") {
-    return true;
-  }
-  return normalized.startsWith("/new ") || normalized.startsWith("/reset ");
+  const suffix = match[1]?.trim();
+  return suffix || null;
 }
 
 export async function handleAbortChat(host: ChatHost) {
@@ -101,16 +113,30 @@ async function sendChatMessageNow(
     previousAttachments?: ChatAttachment[];
     restoreAttachments?: boolean;
     refreshSessions?: boolean;
+    sendOptions?: SendChatMessageOptions;
+    previousMessages?: unknown[];
+    previousToolMessages?: unknown[];
   },
 ) {
   resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
-  const runId = await sendChatMessage(host as unknown as OpenClawApp, message, opts?.attachments);
+  const runId = await sendChatMessage(
+    host as unknown as OpenClawApp,
+    message,
+    opts?.attachments,
+    opts?.sendOptions,
+  );
   const ok = Boolean(runId);
   if (!ok && opts?.previousDraft != null) {
     host.chatMessage = opts.previousDraft;
   }
   if (!ok && opts?.previousAttachments) {
     host.chatAttachments = opts.previousAttachments;
+  }
+  if (!ok && opts?.previousMessages) {
+    host.chatMessages = opts.previousMessages;
+  }
+  if (!ok && opts?.previousToolMessages) {
+    host.chatToolMessages = opts.previousToolMessages;
   }
   if (ok) {
     setLastActiveSessionKey(
@@ -181,6 +207,7 @@ export async function handleSendChat(
   }
 
   const refreshSessions = isChatResetCommand(message);
+  const optimisticResetMessage = refreshSessions ? resolveOptimisticResetMessage(message) : null;
   if (messageOverride == null) {
     host.chatMessage = "";
     // Clear attachments when sending
@@ -199,6 +226,11 @@ export async function handleSendChat(
     previousAttachments: messageOverride == null ? attachments : undefined,
     restoreAttachments: Boolean(messageOverride && opts?.restoreDraft),
     refreshSessions,
+    sendOptions: refreshSessions
+      ? { replaceHistory: true, optimisticMessage: optimisticResetMessage }
+      : undefined,
+    previousMessages: refreshSessions ? [...host.chatMessages] : undefined,
+    previousToolMessages: refreshSessions ? [...host.chatToolMessages] : undefined,
   });
 }
 

@@ -167,7 +167,18 @@ export const FIELD_LABELS: Record<string, string> = {
   "tools.loopDetection.detectors.genericRepeat": "Tool-loop Generic Repeat Detection",
   "tools.loopDetection.detectors.knownPollNoProgress": "Tool-loop Poll No-Progress Detection",
   "tools.loopDetection.detectors.pingPong": "Tool-loop Ping-Pong Detection",
+  "tools.toolResultCache": "Tool Result Cache",
+  "tools.toolResultCache.enabled": "Tool Result Cache Enabled",
+  "tools.toolResultCache.ttlMs": "Tool Result Cache TTL (ms)",
+  "tools.toolResultCache.maxEntries": "Tool Result Cache Max Entries",
+  "tools.toolResultCache.cacheableTools": "Tool Result Cacheable Tools",
+  "tools.parallelExecution": "Tool Parallel Execution",
+  "tools.parallelExecution.enabled": "Tool Parallel Execution Enabled",
+  "tools.parallelExecution.maxConcurrent": "Tool Parallel Max Concurrent",
   "tools.fs.workspaceOnly": "Workspace-only FS tools",
+  "tools.fs.allowPaths": "FS Allow Paths",
+  "tools.fs.denyPaths": "FS Deny Paths",
+  "tools.fs.readOnlyPaths": "FS Read-only Paths",
   "tools.sessions.visibility": "Session Tools Visibility",
   "tools.exec.notifyOnExit": "Exec Notify On Exit",
   "tools.exec.notifyOnExitEmptySuccess": "Exec Notify On Empty Success",
@@ -175,6 +186,8 @@ export const FIELD_LABELS: Record<string, string> = {
   "tools.exec.host": "Exec Host",
   "tools.exec.security": "Exec Security",
   "tools.exec.ask": "Exec Ask",
+  "tools.exec.blockDestructive": "Exec Block Destructive Commands",
+  "tools.exec.destructiveMode": "Exec Destructive Handling Mode",
   "tools.exec.node": "Exec Node Binding",
   "tools.agentToAgent": "Agent-to-Agent Tool Access",
   "tools.agentToAgent.enabled": "Enable Agent-to-Agent Tool",
@@ -210,7 +223,7 @@ export const FIELD_LABELS: Record<string, string> = {
   "tools.message.broadcast.enabled": "Enable Message Broadcast",
   "tools.web.search.enabled": "Enable Web Search Tool",
   "tools.web.search.provider": "Web Search Provider",
-  "tools.web.search.apiKey": "Brave Search API Key",
+  "tools.web.search.apiKey": "Brave Search API Key (Optional)",
   "tools.web.search.maxResults": "Web Search Max Results",
   "tools.web.search.timeoutSeconds": "Web Search Timeout (sec)",
   "tools.web.search.cacheTtlMinutes": "Web Search Cache TTL (min)",
@@ -286,6 +299,8 @@ export const FIELD_LABELS: Record<string, string> = {
   "agents.defaults.envelopeTimestamp": "Envelope Timestamp",
   "agents.defaults.envelopeElapsed": "Envelope Elapsed",
   "agents.defaults.memorySearch": "Memory Search",
+  "agents.defaults.skills": "Skills Prompt Settings",
+  "agents.defaults.skills.promptMode": "Skills Prompt Mode",
   "agents.defaults.memorySearch.enabled": "Enable Memory Search",
   "agents.defaults.memorySearch.sources": "Memory Search Sources",
   "agents.defaults.memorySearch.extraPaths": "Extra Memory Paths",
@@ -316,6 +331,10 @@ export const FIELD_LABELS: Record<string, string> = {
   "agents.defaults.memorySearch.sync.sessions.deltaMessages": "Session Delta Messages",
   "agents.defaults.memorySearch.query.maxResults": "Memory Search Max Results",
   "agents.defaults.memorySearch.query.minScore": "Memory Search Min Score",
+  "agents.defaults.memorySearch.query.routing.enabled": "Memory Search Query Routing",
+  "agents.defaults.memorySearch.query.routing.maxQueries": "Memory Search Deep Max Queries",
+  "agents.defaults.memorySearch.query.routing.deepQueryThreshold":
+    "Memory Search Deep Query Threshold",
   "agents.defaults.memorySearch.query.hybrid.enabled": "Memory Search Hybrid",
   "agents.defaults.memorySearch.query.hybrid.vectorWeight": "Memory Search Vector Weight",
   "agents.defaults.memorySearch.query.hybrid.textWeight": "Memory Search Text Weight",
@@ -328,6 +347,22 @@ export const FIELD_LABELS: Record<string, string> = {
     "Memory Search Temporal Decay Half-life (Days)",
   "agents.defaults.memorySearch.cache.enabled": "Memory Search Embedding Cache",
   "agents.defaults.memorySearch.cache.maxEntries": "Memory Search Embedding Cache Max Entries",
+  "agents.defaults.memorySearch.workingSet": "Memory Search Working Set",
+  "agents.defaults.memorySearch.workingSet.enabled": "Memory Search Working Set Enabled",
+  "agents.defaults.memorySearch.workingSet.sources": "Memory Search Working Set Sources",
+  "agents.defaults.memorySearch.workingSet.ttlMs": "Memory Search Working Set TTL (ms)",
+  "agents.defaults.memorySearch.workingSet.maxEntries":
+    "Memory Search Working Set Max Entries",
+  "agents.defaults.modelRouting": "Stage-aware Model Routing",
+  "agents.defaults.modelRouting.enabled": "Stage-aware Model Routing Enabled",
+  "agents.defaults.modelRouting.plannerModel": "Planner Model",
+  "agents.defaults.modelRouting.retrievalModel": "Retrieval Model",
+  "agents.defaults.modelRouting.compressionModel": "Compression Model",
+  "agents.defaults.modelRouting.verificationModel": "Verification Model",
+  "agents.defaults.modelRouting.escalation.minConfidence":
+    "Model Routing Escalation Min Confidence",
+  "agents.defaults.modelRouting.escalation.maxCheapPasses":
+    "Model Routing Escalation Max Cheap Passes",
   memory: "Memory",
   "memory.backend": "Memory Backend",
   "memory.citations": "Memory Citations Mode",
@@ -423,6 +458,7 @@ export const FIELD_LABELS: Record<string, string> = {
   "agents.defaults.compaction.reserveTokensFloor": "Compaction Reserve Token Floor",
   "agents.defaults.compaction.maxHistoryShare": "Compaction Max History Share",
   "agents.defaults.compaction.identifierPolicy": "Compaction Identifier Policy",
+  "agents.defaults.compaction.pruningStrategy": "Compaction Pruning Strategy",
   "agents.defaults.compaction.identifierInstructions": "Compaction Identifier Instructions",
   "agents.defaults.compaction.memoryFlush": "Compaction Memory Flush",
   "agents.defaults.compaction.memoryFlush.enabled": "Compaction Memory Flush Enabled",
@@ -432,6 +468,20 @@ export const FIELD_LABELS: Record<string, string> = {
     "Compaction Memory Flush Transcript Size Threshold",
   "agents.defaults.compaction.memoryFlush.prompt": "Compaction Memory Flush Prompt",
   "agents.defaults.compaction.memoryFlush.systemPrompt": "Compaction Memory Flush System Prompt",
+  "agents.defaults.compaction.memoryFlush.periodicTurnInterval":
+    "Compaction Memory Flush Periodic Turn Interval",
+  "agents.defaults.compaction.memoryFlush.periodicMinutes":
+    "Compaction Memory Flush Periodic Minutes",
+  "agents.defaults.subagents.autoTier": "Subagent Auto Tiering",
+  "agents.defaults.subagents.simpleTaskModel": "Subagent Simple Task Model",
+  "agents.defaults.subagents.delegation": "Subagent Delegation",
+  "agents.defaults.subagents.delegation.enabled": "Subagent Delegation Enabled",
+  "agents.defaults.subagents.delegation.structuredResults":
+    "Subagent Structured Results",
+  "agents.defaults.subagents.delegation.parallelResearch.enabled":
+    "Subagent Parallel Research Enabled",
+  "agents.defaults.subagents.delegation.parallelResearch.maxConcurrent":
+    "Subagent Parallel Research Max Concurrent",
   "agents.defaults.embeddedPi": "Embedded Pi",
   "agents.defaults.embeddedPi.projectSettingsPolicy": "Embedded Pi Project Settings Policy",
   "agents.defaults.heartbeat.directPolicy": "Heartbeat Direct Policy",
@@ -792,3 +842,7 @@ export const FIELD_LABELS: Record<string, string> = {
   "plugins.installs.*.resolvedAt": "Plugin Resolution Time",
   "plugins.installs.*.installedAt": "Plugin Install Time",
 };
+
+
+
+

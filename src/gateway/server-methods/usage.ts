@@ -738,6 +738,8 @@ export const usageHandlers: GatewayRequestHandlers = {
         providerOverride: merged.storeEntry?.providerOverride,
         modelProvider: merged.storeEntry?.modelProvider,
         model: merged.storeEntry?.model,
+        routing: merged.storeEntry?.lastAgentRouting ?? null,
+        agenticCounters: merged.storeEntry?.agenticCounters ?? null,
         usage,
         contextWeight: includeContextWeight
           ? (merged.storeEntry?.systemPromptReport ?? null)

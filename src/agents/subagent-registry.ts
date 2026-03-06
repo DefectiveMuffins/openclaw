@@ -1,6 +1,10 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { loadConfig } from "../config/config.js";
+import type {
+  SubagentDelegationRole,
+  SubagentResponseFormat,
+} from "./subagent-result-contract.js";
 import {
   loadSessionStore,
   resolveAgentIdFromSessionKey,
@@ -972,6 +976,11 @@ export function registerSubagentRun(params: {
   label?: string;
   model?: string;
   runTimeoutSeconds?: number;
+  role?: SubagentDelegationRole;
+  deliverable?: string;
+  acceptance?: string[];
+  responseFormat?: SubagentResponseFormat;
+  readOnly?: boolean;
   expectsCompletionMessage?: boolean;
   spawnMode?: "run" | "session";
   attachmentsDir?: string;
@@ -999,6 +1008,11 @@ export function registerSubagentRun(params: {
     spawnMode,
     label: params.label,
     model: params.model,
+    role: params.role,
+    deliverable: params.deliverable,
+    acceptance: params.acceptance,
+    responseFormat: params.responseFormat,
+    readOnly: params.readOnly,
     runTimeoutSeconds,
     createdAt: now,
     startedAt: now,

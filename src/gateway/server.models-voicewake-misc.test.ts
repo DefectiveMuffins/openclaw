@@ -145,7 +145,8 @@ const expectedSortedCatalog = (): ModelCatalogRpcEntry[] => [
 ];
 
 describe("gateway server models + voicewake", () => {
-  const listModels = async () => rpcReq<{ models: ModelCatalogRpcEntry[] }>(ws, "models.list");
+  const listModels = async (params?: { includeAll?: boolean }) =>
+    rpcReq<{ models: ModelCatalogRpcEntry[] }>(ws, "models.list", params ?? {});
 
   const seedPiCatalog = () => {
     piSdkMock.enabled = true;
@@ -354,6 +355,26 @@ describe("gateway server models + voicewake", () => {
       ],
     });
   });
+  test("models.list can return the full catalog even when an allowlist is configured", async () => {
+    await withModelsConfig(
+      {
+        agents: {
+          defaults: {
+            model: { primary: "openai/gpt-test-z" },
+            models: {
+              "openai/gpt-test-z": {},
+            },
+          },
+        },
+      },
+      async () => {
+        seedPiCatalog();
+        const res = await listModels({ includeAll: true });
+        expect(res.ok).toBe(true);
+        expect(res.payload?.models).toEqual(expectedSortedCatalog());
+      },
+    );
+  });
 
   test("models.list rejects unknown params", async () => {
     piSdkMock.enabled = true;
@@ -478,3 +499,4 @@ describe("gateway server misc", () => {
     );
   });
 });
+

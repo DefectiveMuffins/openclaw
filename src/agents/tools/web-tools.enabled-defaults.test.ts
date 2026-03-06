@@ -5,10 +5,11 @@ import { createWebFetchTool, createWebSearchTool } from "./web-tools.js";
 
 function installMockFetch(payload: unknown) {
   const mockFetch = vi.fn((_input?: unknown, _init?: unknown) =>
-    Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve(payload),
-    } as Response),
+    Promise.resolve(
+      typeof payload === "string"
+        ? ({ ok: true, text: () => Promise.resolve(payload) } as Response)
+        : ({ ok: true, json: () => Promise.resolve(payload) } as Response),
+    ),
   );
   global.fetch = withFetchPreconnect(mockFetch);
   return mockFetch;
@@ -46,7 +47,7 @@ function createKimiSearchTool(kimiConfig?: { apiKey?: string; baseUrl?: string; 
   });
 }
 
-function createProviderSearchTool(provider: "brave" | "perplexity" | "grok" | "gemini" | "kimi") {
+function createProviderSearchTool(provider: "brave" | "perplexity" | "grok" | "gemini" | "kimi" | "duckduckgo") {
   const searchConfig =
     provider === "perplexity"
       ? { provider, perplexity: { apiKey: "pplx-config-test" } }
@@ -56,7 +57,9 @@ function createProviderSearchTool(provider: "brave" | "perplexity" | "grok" | "g
           ? { provider, gemini: { apiKey: "gemini-config-test" } }
           : provider === "kimi"
             ? { provider, kimi: { apiKey: "moonshot-config-test" } }
-            : { provider, apiKey: "brave-config-test" };
+            : provider === "duckduckgo"
+              ? { provider }
+              : { provider, apiKey: "brave-config-test" };
   return createWebSearchTool({
     config: {
       tools: {
@@ -86,13 +89,16 @@ function installPerplexitySuccessFetch() {
 }
 
 function createProviderSuccessPayload(
-  provider: "brave" | "perplexity" | "grok" | "gemini" | "kimi",
+  provider: "brave" | "perplexity" | "grok" | "gemini" | "kimi" | "duckduckgo",
 ) {
   if (provider === "brave") {
     return { web: { results: [] } };
   }
   if (provider === "perplexity") {
     return { choices: [{ message: { content: "ok" } }], citations: [] };
+  }
+  if (provider === "duckduckgo") {
+    return `<div class="result"><a class="result__a" href="https://example.com/news">ok</a><div class="result__snippet">snippet</div></div>`;
   }
   if (provider === "grok") {
     return { output_text: "ok", citations: [] };
@@ -146,6 +152,21 @@ describe("web tools defaults", () => {
   it("enables web_search by default", () => {
     const tool = createWebSearchTool({ config: {}, sandboxed: false });
     expect(tool?.name).toBe("web_search");
+  });
+
+  it("falls back to duckduckgo when no provider key is configured", async () => {
+    const priorFetch = global.fetch;
+    vi.unstubAllEnvs();
+    const mockFetch = installMockFetch(
+      `<div class="result"><a class="result__a" href="https://example.com/news">Fallback result</a><div class="result__snippet">Fresh snippet</div></div>`,
+    );
+    const tool = createWebSearchTool({ config: {}, sandboxed: false });
+    const result = await tool?.execute?.("call-1", { query: "latest gpt-5.4" });
+    const details = result?.details as { provider?: string; results?: Array<{ url?: string }> };
+    expect(details.provider).toBe("duckduckgo");
+    expect(details.results?.[0]?.url).toBe("https://example.com/news");
+    expect(mockFetch).toHaveBeenCalledOnce();
+    global.fetch = priorFetch;
   });
 });
 
@@ -218,7 +239,7 @@ describe("web_search provider proxy dispatch", () => {
     global.fetch = priorFetch;
   });
 
-  it.each(["brave", "perplexity", "grok", "gemini", "kimi"] as const)(
+  it.each(["brave", "perplexity", "grok", "gemini", "kimi", "duckduckgo"] as const)(
     "uses proxy-aware dispatcher for %s provider when HTTP_PROXY is configured",
     async (provider) => {
       vi.stubEnv("HTTP_PROXY", "http://127.0.0.1:7890");

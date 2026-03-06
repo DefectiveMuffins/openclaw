@@ -8,7 +8,12 @@ import {
   normalizeToolName,
   resolveToolProfilePolicy,
 } from "../../../../src/agents/tool-policy-shared.js";
-import type { AgentIdentityResult, AgentsFilesListResult, AgentsListResult } from "../types.ts";
+import type {
+  AgentIdentityResult,
+  AgentsFilesListResult,
+  AgentsListResult,
+  GatewayModelChoice,
+} from "../types.ts";
 
 export const TOOL_SECTIONS = listCoreToolSections();
 
@@ -19,13 +24,66 @@ type ToolPolicy = {
   deny?: string[];
 };
 
+type AgentSkillsConfig = {
+  promptMode?: string;
+};
+
+type AgentMemorySearchConfig = {
+  enabled?: boolean;
+  provider?: string;
+  query?: {
+    routing?: {
+      enabled?: boolean;
+      maxQueries?: number;
+      deepQueryThreshold?: number;
+    };
+  };
+  workingSet?: {
+    enabled?: boolean;
+    sources?: string[];
+    ttlMs?: number;
+    maxEntries?: number;
+  };
+};
+
+type AgentModelRoutingConfig = {
+  enabled?: boolean;
+  plannerModel?: string;
+  retrievalModel?: string;
+  compressionModel?: string;
+  verificationModel?: string;
+  escalation?: {
+    minConfidence?: number;
+    maxCheapPasses?: number;
+  };
+};
+
+type AgentSubagentDelegationConfig = {
+  enabled?: boolean;
+  structuredResults?: boolean;
+  parallelResearch?: {
+    enabled?: boolean;
+    maxConcurrent?: number;
+  };
+};
+
+type AgentSubagentsConfig = {
+  autoTier?: boolean;
+  simpleTaskModel?: string;
+  delegation?: AgentSubagentDelegationConfig;
+};
+
 type AgentConfigEntry = {
   id: string;
   name?: string;
   workspace?: string;
   agentDir?: string;
   model?: unknown;
-  skills?: string[];
+  thinkingDefault?: string;
+  skills?: string[] | AgentSkillsConfig;
+  memorySearch?: AgentMemorySearchConfig;
+  modelRouting?: AgentModelRoutingConfig;
+  subagents?: AgentSubagentsConfig;
   tools?: {
     profile?: string;
     allow?: string[];
@@ -34,9 +92,20 @@ type AgentConfigEntry = {
   };
 };
 
+type AgentDefaultsConfig = {
+  workspace?: string;
+  model?: unknown;
+  models?: Record<string, { alias?: string }>;
+  thinkingDefault?: string;
+  skills?: AgentSkillsConfig;
+  memorySearch?: AgentMemorySearchConfig;
+  modelRouting?: AgentModelRoutingConfig;
+  subagents?: AgentSubagentsConfig;
+};
+
 type ConfigSnapshot = {
   agents?: {
-    defaults?: { workspace?: string; model?: unknown; models?: Record<string, { alias?: string }> };
+    defaults?: AgentDefaultsConfig;
     list?: AgentConfigEntry[];
   };
   tools?: {
@@ -251,6 +320,165 @@ export function resolveEffectiveModelFallbacks(
   return resolveModelFallbacks(entryModel) ?? resolveModelFallbacks(defaultModel);
 }
 
+export type AgentOptimizationSummary = {
+  thinkingDefault: string;
+  skillsPromptMode: string;
+  memorySearch: {
+    enabled: boolean;
+    provider?: string;
+    routingEnabled: boolean;
+    maxQueries?: number;
+    deepQueryThreshold?: number;
+    workingSetEnabled: boolean;
+    workingSetSources: string[];
+    workingSetTtlMs?: number;
+    workingSetMaxEntries?: number;
+  };
+  modelRouting: {
+    enabled: boolean;
+    plannerModel?: string;
+    retrievalModel?: string;
+    compressionModel?: string;
+    verificationModel?: string;
+    minConfidence?: number;
+    maxCheapPasses?: number;
+  };
+  subagents: {
+    autoTier: boolean;
+    simpleTaskModel?: string;
+    delegationEnabled: boolean;
+    structuredResults: boolean;
+    parallelResearchEnabled: boolean;
+    parallelResearchMaxConcurrent?: number;
+  };
+};
+
+function pickDefined<T>(...values: Array<T | undefined>): T | undefined {
+  for (const value of values) {
+    if (value !== undefined) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function normalizeStringList(values: unknown): string[] {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  return values.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+}
+
+export function resolveAgentOptimizationSummary(
+  config: Record<string, unknown> | null,
+  agentId: string,
+): AgentOptimizationSummary {
+  const { entry, defaults } = resolveAgentConfig(config, agentId);
+  const entrySkills =
+    entry?.skills && !Array.isArray(entry.skills) ? (entry.skills as AgentSkillsConfig) : undefined;
+  const defaultSkills = defaults?.skills;
+  const defaultMemory = defaults?.memorySearch;
+  const entryMemory = entry?.memorySearch;
+  const defaultModelRouting = defaults?.modelRouting;
+  const entryModelRouting = entry?.modelRouting;
+  const defaultSubagents = defaults?.subagents;
+  const entrySubagents = entry?.subagents;
+  const workingSetSources = Array.from(
+    new Set([
+      ...normalizeStringList(defaultMemory?.workingSet?.sources),
+      ...normalizeStringList(entryMemory?.workingSet?.sources),
+    ]),
+  );
+
+  return {
+    thinkingDefault: pickDefined(entry?.thinkingDefault, defaults?.thinkingDefault, "off") ?? "off",
+    skillsPromptMode:
+      pickDefined(entrySkills?.promptMode, defaultSkills?.promptMode, "full") ?? "full",
+    memorySearch: {
+      enabled: Boolean(pickDefined(entryMemory?.enabled, defaultMemory?.enabled, false)),
+      provider: pickDefined(entryMemory?.provider, defaultMemory?.provider),
+      routingEnabled: Boolean(
+        pickDefined(entryMemory?.query?.routing?.enabled, defaultMemory?.query?.routing?.enabled, false),
+      ),
+      maxQueries: pickDefined(
+        entryMemory?.query?.routing?.maxQueries,
+        defaultMemory?.query?.routing?.maxQueries,
+      ),
+      deepQueryThreshold: pickDefined(
+        entryMemory?.query?.routing?.deepQueryThreshold,
+        defaultMemory?.query?.routing?.deepQueryThreshold,
+      ),
+      workingSetEnabled: Boolean(
+        pickDefined(entryMemory?.workingSet?.enabled, defaultMemory?.workingSet?.enabled, false),
+      ),
+      workingSetSources,
+      workingSetTtlMs: pickDefined(entryMemory?.workingSet?.ttlMs, defaultMemory?.workingSet?.ttlMs),
+      workingSetMaxEntries: pickDefined(
+        entryMemory?.workingSet?.maxEntries,
+        defaultMemory?.workingSet?.maxEntries,
+      ),
+    },
+    modelRouting: {
+      enabled: Boolean(
+        pickDefined(entryModelRouting?.enabled, defaultModelRouting?.enabled, false),
+      ),
+      plannerModel: pickDefined(entryModelRouting?.plannerModel, defaultModelRouting?.plannerModel),
+      retrievalModel: pickDefined(
+        entryModelRouting?.retrievalModel,
+        defaultModelRouting?.retrievalModel,
+      ),
+      compressionModel: pickDefined(
+        entryModelRouting?.compressionModel,
+        defaultModelRouting?.compressionModel,
+      ),
+      verificationModel: pickDefined(
+        entryModelRouting?.verificationModel,
+        defaultModelRouting?.verificationModel,
+      ),
+      minConfidence: pickDefined(
+        entryModelRouting?.escalation?.minConfidence,
+        defaultModelRouting?.escalation?.minConfidence,
+      ),
+      maxCheapPasses: pickDefined(
+        entryModelRouting?.escalation?.maxCheapPasses,
+        defaultModelRouting?.escalation?.maxCheapPasses,
+      ),
+    },
+    subagents: {
+      autoTier: Boolean(pickDefined(entrySubagents?.autoTier, defaultSubagents?.autoTier, false)),
+      simpleTaskModel: pickDefined(
+        entrySubagents?.simpleTaskModel,
+        defaultSubagents?.simpleTaskModel,
+      ),
+      delegationEnabled: Boolean(
+        pickDefined(
+          entrySubagents?.delegation?.enabled,
+          defaultSubagents?.delegation?.enabled,
+          false,
+        ),
+      ),
+      structuredResults: Boolean(
+        pickDefined(
+          entrySubagents?.delegation?.structuredResults,
+          defaultSubagents?.delegation?.structuredResults,
+          false,
+        ),
+      ),
+      parallelResearchEnabled: Boolean(
+        pickDefined(
+          entrySubagents?.delegation?.parallelResearch?.enabled,
+          defaultSubagents?.delegation?.parallelResearch?.enabled,
+          false,
+        ),
+      ),
+      parallelResearchMaxConcurrent: pickDefined(
+        entrySubagents?.delegation?.parallelResearch?.maxConcurrent,
+        defaultSubagents?.delegation?.parallelResearch?.maxConcurrent,
+      ),
+    },
+  };
+}
+
 function addModelId(target: Set<string>, value: unknown) {
   if (typeof value !== "string") {
     return;
@@ -360,18 +588,40 @@ function resolveConfiguredModels(
   return options;
 }
 
+function buildCatalogModelOptions(modelChoices: GatewayModelChoice[]): ConfiguredModelOption[] {
+  return modelChoices.flatMap((entry) => {
+    const provider = entry.provider?.trim();
+    const id = entry.id?.trim();
+    if (!provider || !id) {
+      return [];
+    }
+    const value = `${provider}/${id}`;
+    const name = entry.name?.trim();
+    return [{ value, label: name && name !== id ? `${name} (${value})` : value }];
+  });
+}
+
 export function buildModelOptions(
   configForm: Record<string, unknown> | null,
   current?: string | null,
+  modelChoices: GatewayModelChoice[] = [],
 ) {
   const options = resolveConfiguredModels(configForm);
-  const hasCurrent = current ? options.some((option) => option.value === current) : false;
+  const seen = new Set(options.map((option) => option.value));
+  for (const option of buildCatalogModelOptions(modelChoices)) {
+    if (seen.has(option.value)) {
+      continue;
+    }
+    options.push(option);
+    seen.add(option.value);
+  }
+  const hasCurrent = current ? seen.has(current) : false;
   if (current && !hasCurrent) {
     options.unshift({ value: current, label: `Current (${current})` });
   }
   if (options.length === 0) {
     return html`
-      <option value="" disabled>No configured models</option>
+      <option value="" disabled>No available models</option>
     `;
   }
   return options.map((option) => html`<option value=${option.value}>${option.label}</option>`);
@@ -463,3 +713,4 @@ export function matchesList(name: string, list?: string[]) {
 export function resolveToolProfile(profile: string) {
   return resolveToolProfilePolicy(profile) ?? undefined;
 }
+

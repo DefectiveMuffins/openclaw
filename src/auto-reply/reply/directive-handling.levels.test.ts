@@ -33,4 +33,34 @@ describe("resolveCurrentDirectiveLevels", () => {
     expect(result.currentThinkLevel).toBe("minimal");
     expect(resolveDefaultThinkingLevel).not.toHaveBeenCalled();
   });
+
+  it("resolves adaptive default using message text", async () => {
+    const resolveDefaultThinkingLevel = vi.fn().mockResolvedValue("adaptive");
+
+    const result = await resolveCurrentDirectiveLevels({
+      sessionEntry: {},
+      agentCfg: {
+        thinkingDefault: "low",
+      },
+      resolveDefaultThinkingLevel,
+      messageText: "hi",
+    });
+
+    expect(result.currentThinkLevel).toBe("off");
+  });
+
+  it("resolves adaptive session overrides using recent history", async () => {
+    const resolveDefaultThinkingLevel = vi.fn().mockResolvedValue("low");
+
+    const result = await resolveCurrentDirectiveLevels({
+      sessionEntry: {
+        thinkingLevel: "adaptive",
+      },
+      resolveDefaultThinkingLevel,
+      messageText: "fix this",
+      recentHistory: ["debug race condition in dispatcher"],
+    });
+
+    expect(result.currentThinkLevel).toBe("high");
+  });
 });

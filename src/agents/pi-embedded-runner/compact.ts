@@ -13,6 +13,7 @@ import { resolveChannelCapabilities } from "../../config/channel-capabilities.js
 import type { OpenClawConfig } from "../../config/config.js";
 import { getMachineDisplayName } from "../../infra/machine-name.js";
 import { generateSecureToken } from "../../infra/secure-random.js";
+import { auditMemoryStaleness } from "../../memory/staleness-audit.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { type enqueueCommand, enqueueCommandInLane } from "../../process/command-queue.js";
 import { isCronSessionKey, isSubagentSessionKey } from "../../routing/session-key.js";
@@ -33,6 +34,11 @@ import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../defaults.js";
 import { resolveOpenClawDocsPath } from "../docs-path.js";
 import { getApiKeyForModel, resolveModelAuthMode } from "../model-auth.js";
 import { ensureOpenClawModelsJson } from "../models-config.js";
+import {
+  parseModelRef,
+  resolvePhaseAwareThinkLevel,
+  resolveStageAwareModelSelection,
+} from "../model-selection.js";
 import { resolveOwnerDisplaySetting } from "../owner-display.js";
 import {
   ensureSessionHeader,
@@ -41,7 +47,9 @@ import {
 } from "../pi-embedded-helpers.js";
 import { createPreparedEmbeddedPiSettingsManager } from "../pi-project-settings.js";
 import { createOpenClawCodingTools } from "../pi-tools.js";
+import { resolveEffectiveToolPolicy } from "../pi-tools.policy.js";
 import { resolveSandboxContext } from "../sandbox.js";
+import { invalidateToolResultCache } from "../tool-result-cache.js";
 import { repairSessionFileIfNeeded } from "../session-file-repair.js";
 import { guardSessionManager } from "../session-tool-result-guard-wrapper.js";
 import { sanitizeToolUseResultPairing } from "../session-transcript-repair.js";
@@ -256,8 +264,25 @@ export async function compactEmbeddedPiSessionDirect(
   const resolvedWorkspace = resolveUserPath(params.workspaceDir);
   const prevCwd = process.cwd();
 
-  const provider = (params.provider ?? DEFAULT_PROVIDER).trim() || DEFAULT_PROVIDER;
-  const modelId = (params.model ?? DEFAULT_MODEL).trim() || DEFAULT_MODEL;
+  let provider = (params.provider ?? DEFAULT_PROVIDER).trim() || DEFAULT_PROVIDER;
+  let modelId = (params.model ?? DEFAULT_MODEL).trim() || DEFAULT_MODEL;
+  const modelPhase = "compression" as const;
+  const stageAwareModel = params.config
+    ? resolveStageAwareModelSelection({
+        cfg: params.config,
+        phase: modelPhase,
+      })
+    : undefined;
+  if (stageAwareModel) {
+    const routedRef = parseModelRef(stageAwareModel, provider);
+    if (routedRef) {
+      provider = routedRef.provider;
+      modelId = routedRef.model;
+    }
+  }
+  const resolvedThinkLevel =
+    resolvePhaseAwareThinkLevel({ phase: modelPhase, thinkLevel: params.thinkLevel }) ??
+    params.thinkLevel;
   const fail = (reason: string): EmbeddedPiCompactResult => {
     log.warn(
       `[compaction-diag] end runId=${runId} sessionKey=${params.sessionKey ?? params.sessionId} ` +
@@ -313,6 +338,7 @@ export async function compactEmbeddedPiSessionDirect(
 
   await fs.mkdir(resolvedWorkspace, { recursive: true });
   const sandboxSessionKey = params.sessionKey?.trim() || params.sessionId;
+  invalidateToolResultCache(sandboxSessionKey);
   const sandbox = await resolveSandboxContext({
     config: params.config,
     sessionKey: sandboxSessionKey,
@@ -361,6 +387,7 @@ export async function compactEmbeddedPiSessionDirect(
       sessionId: params.sessionId,
       warn: makeBootstrapWarn({ sessionLabel, warn: (message) => log.warn(message) }),
     });
+    const memoryStaleness = await auditMemoryStaleness(effectiveWorkspace);
     const runAbortController = new AbortController();
     const toolsRaw = createOpenClawCodingTools({
       exec: {
@@ -469,6 +496,14 @@ export async function compactEmbeddedPiSessionDirect(
       sessionKey: params.sessionKey,
       config: params.config,
     });
+    const effectiveToolPolicy = resolveEffectiveToolPolicy({
+      config: params.config,
+      sessionKey: sandboxSessionKey,
+      agentId: sessionAgentId,
+      modelProvider: model.provider,
+      modelId,
+    });
+    const toolProfile = effectiveToolPolicy.providerProfile ?? effectiveToolPolicy.profile;
     const isDefaultAgent = sessionAgentId === defaultAgentId;
     const promptMode =
       isSubagentSessionKey(params.sessionKey) || isCronSessionKey(params.sessionKey)
@@ -484,7 +519,7 @@ export async function compactEmbeddedPiSessionDirect(
     const ownerDisplay = resolveOwnerDisplaySetting(params.config);
     const appendPrompt = buildEmbeddedSystemPrompt({
       workspaceDir: effectiveWorkspace,
-      defaultThinkLevel: params.thinkLevel,
+      defaultThinkLevel: resolvedThinkLevel,
       reasoningLevel: params.reasoningLevel ?? "off",
       extraSystemPrompt: params.extraSystemPrompt,
       ownerNumbers: params.ownerNumbers,
@@ -510,6 +545,8 @@ export async function compactEmbeddedPiSessionDirect(
       userTimeFormat,
       contextFiles,
       memoryCitationsMode: params.config?.memory?.citations,
+      toolProfile,
+      memoryStalenessHint: memoryStaleness.hint,
     });
     const systemPromptOverride = createSystemPromptOverride(appendPrompt);
 
@@ -575,7 +612,7 @@ export async function compactEmbeddedPiSessionDirect(
         authStorage,
         modelRegistry,
         model,
-        thinkingLevel: mapThinkingLevel(params.thinkLevel),
+        thinkingLevel: mapThinkingLevel(resolvedThinkLevel),
         tools: builtInTools,
         customTools,
         sessionManager,
@@ -759,3 +796,4 @@ export async function compactEmbeddedPiSession(
     enqueueGlobal(async () => compactEmbeddedPiSessionDirect(params)),
   );
 }
+

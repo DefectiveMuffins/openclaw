@@ -125,6 +125,19 @@ vi.mock("../config/sessions.js", () => ({
   resolveMainSessionKey: () => "agent:main:main",
   readSessionUpdatedAt: vi.fn(() => undefined),
   recordSessionMetaFromInbound: vi.fn().mockResolvedValue(undefined),
+  updateSessionStoreEntry: vi.fn(async (params: {
+    sessionKey: string;
+    update: (entry: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
+  }) => {
+    const existing = sessionStore[params.sessionKey] ?? { sessionId: params.sessionKey, updatedAt: 0 };
+    const patch = await params.update(existing);
+    if (!patch) {
+      return existing;
+    }
+    const next = { ...existing, ...patch };
+    sessionStore[params.sessionKey] = next;
+    return next;
+  }),
 }));
 
 vi.mock("./pi-embedded.js", () => embeddedRunMock);
@@ -421,7 +434,7 @@ describe("subagent announce formatting", () => {
     expect(call?.params?.channel).toBe("discord");
     expect(call?.params?.to).toBe("channel:12345");
     expect(call?.params?.sessionKey).toBe("agent:main:main");
-    expect(msg).toContain("✅ Subagent main finished");
+    expect(msg).toContain("? Subagent main finished");
     expect(msg).toContain("final answer: 2");
     expect(msg).not.toContain("Convert the result above into your normal assistant voice");
   });
@@ -787,8 +800,8 @@ describe("subagent announce formatting", () => {
         childRunId: "run-direct-completion-error",
         replyText: "boom details",
         outcome: { status: "error", error: "boom" } as const,
-        expectedHeader: "❌ Subagent main failed this task (session remains active)",
-        excludedHeader: "✅ Subagent main",
+        expectedHeader: "? Subagent main failed this task (session remains active)",
+        excludedHeader: "completed this task",
         spawnMode: "session" as const,
       },
       {
@@ -797,8 +810,8 @@ describe("subagent announce formatting", () => {
         childRunId: "run-direct-completion-timeout",
         replyText: "partial output",
         outcome: { status: "timeout" } as const,
-        expectedHeader: "⏱️ Subagent main timed out",
-        excludedHeader: "✅ Subagent main finished",
+        expectedHeader: "?? Subagent main timed out",
+        excludedHeader: "finished",
         spawnMode: undefined,
       },
     ] as const;
@@ -1485,7 +1498,7 @@ describe("subagent announce formatting", () => {
     expect(sendSpy).toHaveBeenCalledTimes(1);
     const call = sendSpy.mock.calls[0]?.[0] as { params?: { message?: string } };
     const msg = call?.params?.message as string;
-    expect(msg).toContain("✅ Subagent main finished");
+    expect(msg).toContain("? Subagent main finished");
     expect(msg).not.toContain("user prompt should not be announced");
   });
 

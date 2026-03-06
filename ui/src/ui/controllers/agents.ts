@@ -1,5 +1,5 @@
 import type { GatewayBrowserClient } from "../gateway.ts";
-import type { AgentsListResult, ToolsCatalogResult } from "../types.ts";
+import type { AgentsListResult, GatewayModelChoice, ToolsCatalogResult } from "../types.ts";
 
 export type AgentsState = {
   client: GatewayBrowserClient | null;
@@ -8,6 +8,7 @@ export type AgentsState = {
   agentsError: string | null;
   agentsList: AgentsListResult | null;
   agentsSelectedId: string | null;
+  agentModelChoices: GatewayModelChoice[];
   toolsCatalogLoading: boolean;
   toolsCatalogError: string | null;
   toolsCatalogResult: ToolsCatalogResult | null;
@@ -39,6 +40,54 @@ export async function loadAgents(state: AgentsState) {
   }
 }
 
+export async function loadAgentModelChoices(state: AgentsState) {
+  if (!state.client || !state.connected) {
+    return;
+  }
+  try {
+    const res = await state.client.request<{ models?: unknown[] }>("models.list", {
+      includeAll: true,
+    });
+    const models = Array.isArray(res?.models) ? res.models : [];
+    const seen = new Set<string>();
+    state.agentModelChoices = models.flatMap((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return [];
+      }
+      const provider =
+        typeof (entry as { provider?: unknown }).provider === "string"
+          ? (entry as { provider: string }).provider.trim()
+          : "";
+      const id =
+        typeof (entry as { id?: unknown }).id === "string"
+          ? (entry as { id: string }).id.trim()
+          : "";
+      if (!provider || !id) {
+        return [];
+      }
+      const key = `${provider}/${id}`.toLowerCase();
+      if (seen.has(key)) {
+        return [];
+      }
+      seen.add(key);
+      const name =
+        typeof (entry as { name?: unknown }).name === "string"
+          ? (entry as { name: string }).name.trim()
+          : id;
+      return [
+        {
+          ...(entry as Omit<GatewayModelChoice, "id" | "name" | "provider">),
+          id,
+          name: name || id,
+          provider,
+        } satisfies GatewayModelChoice,
+      ];
+    });
+  } catch {
+    state.agentModelChoices = [];
+  }
+}
+
 export async function loadToolsCatalog(state: AgentsState, agentId?: string | null) {
   if (!state.client || !state.connected) {
     return;
@@ -62,3 +111,4 @@ export async function loadToolsCatalog(state: AgentsState, agentId?: string | nu
     state.toolsCatalogLoading = false;
   }
 }
+

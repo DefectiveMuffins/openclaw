@@ -495,6 +495,7 @@ export async function runReplyAgent(params: {
       providerUsed,
       contextTokensUsed,
       systemPromptReport: runResult.meta?.systemPromptReport,
+      routing: runResult.meta?.agentMeta?.routing ?? null,
       cliSessionId,
     });
 

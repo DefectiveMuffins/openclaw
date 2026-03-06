@@ -117,6 +117,46 @@ export type CliBackendConfig = {
   };
 };
 
+export type AgentModelRoutingPhase =
+  | "planner"
+  | "retrieval"
+  | "compression"
+  | "subagent"
+  | "synthesis"
+  | "verification";
+
+export type AgentModelRoutingConfig = {
+  /** Enable stage-aware model routing for planner/retrieval/compression/verification phases (default: false). */
+  enabled?: boolean;
+  /** Cheap model override for planner/classification passes. */
+  plannerModel?: string;
+  /** Cheap model override for retrieval planning and recall compression. */
+  retrievalModel?: string;
+  /** Cheap model override for compression/consolidation passes. */
+  compressionModel?: string;
+  /** Cheap model override for verification passes before escalation. */
+  verificationModel?: string;
+  escalation?: {
+    /** Minimum evidence confidence before the runtime escalates to the primary synthesis path (default: 0.65). */
+    minConfidence?: number;
+    /** Maximum number of cheap-stage passes before escalation is forced (default: 2). */
+    maxCheapPasses?: number;
+  };
+};
+
+export type AgentSubagentDelegationConfig = {
+  /** Enable structured delegation helpers for spawned subagents (default: false). */
+  enabled?: boolean;
+  /** Require structured completion envelopes for delegation-aware subagents (default: true when enabled). */
+  structuredResults?: boolean;
+  parallelResearch?: {
+    /** Allow read-only research/summarize subagents to fan out concurrently (default: false). */
+    enabled?: boolean;
+    /** Maximum concurrent research fan-out width when enabled (default: 3). */
+    maxConcurrent?: number;
+  };
+};
+
 export type AgentDefaultsConfig = {
   /** Primary model and fallbacks (provider/model). Accepts string or {primary,fallbacks}. */
   model?: AgentModelConfig;
@@ -176,6 +216,13 @@ export type AgentDefaultsConfig = {
   };
   /** Vector memory search configuration (per-agent overrides supported). */
   memorySearch?: MemorySearchConfig;
+  /** Optional stage-aware routing to cheaper models for planner/retrieval/compression/verification passes. */
+  modelRouting?: AgentModelRoutingConfig;
+  /** Skills prompt shaping options. */
+  skills?: {
+    /** Prompt verbosity mode for injected <available_skills> blocks (default: "full"). */
+    promptMode?: "full" | "compact";
+  };
   /** Default thinking level when no /think directive is present. */
   thinkingDefault?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "adaptive";
   /** Default verbose level when no /verbose directive is present. */
@@ -268,12 +315,18 @@ export type AgentDefaultsConfig = {
     archiveAfterMinutes?: number;
     /** Default model selection for spawned sub-agents (string or {primary,fallbacks}). */
     model?: AgentModelConfig;
+    /** Auto-select a cheaper model for clearly simple subagent tasks (default: false). */
+    autoTier?: boolean;
+    /** Model used for simple tasks when autoTier is enabled (for example, anthropic/claude-haiku-4-5). */
+    simpleTaskModel?: string;
     /** Default thinking level for spawned sub-agents (e.g. "off", "low", "medium", "high"). */
     thinking?: string;
     /** Default run timeout in seconds for spawned sub-agents (0 = no timeout). */
     runTimeoutSeconds?: number;
     /** Gateway timeout in ms for sub-agent announce delivery calls (default: 60000). */
     announceTimeoutMs?: number;
+    /** Structured delegation defaults for spawned sub-agents. */
+    delegation?: AgentSubagentDelegationConfig;
   };
   /** Optional sandbox settings for non-main sessions. */
   sandbox?: AgentSandboxConfig;
@@ -281,6 +334,7 @@ export type AgentDefaultsConfig = {
 
 export type AgentCompactionMode = "default" | "safeguard";
 export type AgentCompactionIdentifierPolicy = "strict" | "off" | "custom";
+export type AgentCompactionPruningStrategy = "recency" | "relevance";
 
 export type AgentCompactionConfig = {
   /** Compaction summarization mode. */
@@ -295,6 +349,8 @@ export type AgentCompactionConfig = {
   maxHistoryShare?: number;
   /** Identifier-preservation instruction policy for compaction summaries. */
   identifierPolicy?: AgentCompactionIdentifierPolicy;
+  /** Strategy for pruning pre-compaction history under budget pressure (default: "recency"). */
+  pruningStrategy?: AgentCompactionPruningStrategy;
   /** Custom identifier-preservation instructions used when identifierPolicy is "custom". */
   identifierInstructions?: string;
   /** Pre-compaction memory flush (agentic turn). Default: enabled. */
@@ -315,4 +371,8 @@ export type AgentCompactionMemoryFlushConfig = {
   prompt?: string;
   /** System prompt appended for the memory flush turn. */
   systemPrompt?: string;
+  /** Flush every N turns since last flush (0 disables periodic-turn trigger). */
+  periodicTurnInterval?: number;
+  /** Flush every N minutes since last flush (0 disables periodic-time trigger). */
+  periodicMinutes?: number;
 };

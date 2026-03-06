@@ -1325,6 +1325,54 @@ describe("persistSessionUsageUpdate", () => {
     expect(stored[sessionKey].totalTokens).toBe(250_000);
     expect(stored[sessionKey].totalTokensFresh).toBe(true);
   });
+
+  it("persists latest agent routing summary when provided", async () => {
+    const storePath = await createStorePath("openclaw-usage-routing-");
+    const sessionKey = "main";
+    await seedSessionStore({
+      storePath,
+      sessionKey,
+      entry: {
+        sessionId: "s1",
+        updatedAt: Date.now(),
+        lastAgentRouting: {
+          phase: "synthesis",
+          cheapPath: false,
+          updatedAt: 1,
+        },
+      },
+    });
+
+    await persistSessionUsageUpdate({
+      storePath,
+      sessionKey,
+      modelUsed: "openai/gpt-5.2",
+      routing: {
+        phase: "retrieval",
+        cheapPath: true,
+        escalated: true,
+        cheapPassIndex: 1,
+        evidenceConfidence: 0.72,
+      },
+    });
+
+    const stored = JSON.parse(await fs.readFile(storePath, "utf-8"));
+    expect(stored[sessionKey].model).toBe("openai/gpt-5.2");
+    expect(stored[sessionKey].lastAgentRouting).toMatchObject({
+      phase: "retrieval",
+      cheapPath: true,
+      escalated: true,
+      cheapPassIndex: 1,
+      evidenceConfidence: 0.72,
+    });
+    expect(stored[sessionKey].agenticCounters).toMatchObject({
+      routedRuns: 1,
+      cheapPathRuns: 1,
+      escalations: 1,
+    });
+    expect(typeof stored[sessionKey].lastAgentRouting.updatedAt).toBe("number");
+    expect(typeof stored[sessionKey].agenticCounters.updatedAt).toBe("number");
+  });
 });
 
 describe("initSessionState stale threadId fallback", () => {

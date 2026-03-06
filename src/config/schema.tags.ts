@@ -50,6 +50,40 @@ const TAG_OVERRIDES: Record<string, ConfigTag[]> = {
   "gateway.controlUi.dangerouslyDisableDeviceAuth": ["security", "access", "network", "advanced"],
   "gateway.controlUi.allowInsecureAuth": ["security", "access", "network", "advanced"],
   "tools.exec.applyPatch.workspaceOnly": ["tools", "security", "access", "advanced"],
+  "tools.exec.blockDestructive": ["tools", "security", "access"],
+  "tools.exec.destructiveMode": ["tools", "security", "access"],
+  "tools.fs.allowPaths": ["tools", "security", "access"],
+  "tools.fs.denyPaths": ["tools", "security", "access"],
+  "tools.fs.readOnlyPaths": ["tools", "security", "access"],
+  "agents.defaults.skills": ["tools", "performance"],
+  "agents.defaults.skills.promptMode": ["tools", "performance"],
+  "agents.defaults.memorySearch.query.routing.enabled": ["performance", "storage", "models"],
+  "agents.defaults.memorySearch.query.routing.maxQueries": ["performance", "storage"],
+  "agents.defaults.memorySearch.query.routing.deepQueryThreshold": ["performance", "models"],
+  "agents.defaults.memorySearch.workingSet": ["performance", "storage", "tools"],
+  "agents.defaults.memorySearch.workingSet.enabled": ["performance", "storage", "tools"],
+  "agents.defaults.memorySearch.workingSet.sources": ["performance", "storage", "tools"],
+  "agents.defaults.memorySearch.workingSet.ttlMs": ["performance", "storage"],
+  "agents.defaults.memorySearch.workingSet.maxEntries": ["performance", "storage"],
+  "agents.defaults.modelRouting": ["models", "performance"],
+  "agents.defaults.modelRouting.enabled": ["models", "performance"],
+  "agents.defaults.modelRouting.plannerModel": ["models", "performance"],
+  "agents.defaults.modelRouting.retrievalModel": ["models", "performance"],
+  "agents.defaults.modelRouting.compressionModel": ["models", "performance"],
+  "agents.defaults.modelRouting.verificationModel": ["models", "performance"],
+  "agents.defaults.modelRouting.escalation.minConfidence": ["models", "performance", "reliability"],
+  "agents.defaults.modelRouting.escalation.maxCheapPasses": ["models", "performance", "reliability"],
+  "tools.toolResultCache": ["tools", "performance", "storage"],
+  "tools.parallelExecution": ["tools", "performance"],
+  "agents.defaults.compaction.pruningStrategy": ["performance", "reliability"],
+  "agents.defaults.subagents.autoTier": ["tools", "models", "performance"],
+  "agents.defaults.subagents.simpleTaskModel": ["tools", "models", "performance"],
+  "agents.defaults.subagents.delegation": ["tools", "models", "performance"],
+  "agents.defaults.subagents.delegation.enabled": ["tools", "models", "performance"],
+  "agents.defaults.subagents.delegation.structuredResults": ["tools", "models", "performance"],
+  "agents.defaults.subagents.delegation.parallelResearch.enabled": ["tools", "performance", "reliability"],
+  "agents.defaults.subagents.delegation.parallelResearch.maxConcurrent":
+    ["tools", "performance", "reliability"],
 };
 
 const PREFIX_RULES: Array<{ prefix: string; tags: ConfigTag[] }> = [
@@ -184,3 +218,6 @@ export function applyDerivedTags(hints: ConfigUiHints): ConfigUiHints {
   }
   return next;
 }
+
+
+

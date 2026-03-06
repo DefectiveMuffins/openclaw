@@ -361,6 +361,12 @@ describe("isPrivateOrLoopbackHost", () => {
     expect(isPrivateOrLoopbackHost("[::1]")).toBe(true);
   });
 
+  it("accepts host headers with ports", () => {
+    expect(isPrivateOrLoopbackHost("127.0.0.1:18789")).toBe(true);
+    expect(isPrivateOrLoopbackHost("192.168.1.100:18789")).toBe(true);
+    expect(isPrivateOrLoopbackHost("[::1]:18789")).toBe(true);
+  });
+
   it("accepts RFC 1918 private addresses", () => {
     expect(isPrivateOrLoopbackHost("10.0.0.5")).toBe(true);
     expect(isPrivateOrLoopbackHost("10.42.1.100")).toBe(true);

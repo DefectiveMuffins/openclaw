@@ -6,7 +6,9 @@ import { resolveThinkingDefault } from "../../agents/model-selection.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { dispatchInboundMessage } from "../../auto-reply/dispatch.js";
 import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.js";
+import { BARE_SESSION_RESET_PROMPT } from "../../auto-reply/reply/session-reset-prompt.js";
 import type { MsgContext } from "../../auto-reply/templating.js";
+import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../../auto-reply/tokens.js";
 import { createReplyPrefixOptions } from "../../channels/reply-prefix.js";
 import { resolveSessionFilePath } from "../../config/sessions.js";
 import { jsonUtf8Bytes } from "../../infra/json-utf8-bytes.js";
@@ -186,17 +188,128 @@ function sanitizeChatHistoryMessage(message: unknown): { message: unknown; chang
   return { message: changed ? entry : message, changed };
 }
 
+function extractChatHistoryDisplayText(message: Record<string, unknown>): string | null {
+  if (typeof message.content === "string") {
+    return message.content.trim();
+  }
+  if (Array.isArray(message.content)) {
+    const parts = message.content
+      .map((block) => {
+        if (!block || typeof block !== "object") {
+          return null;
+        }
+        const text = (block as { text?: unknown }).text;
+        return typeof text === "string" ? text.trim() : null;
+      })
+      .filter((text): text is string => Boolean(text));
+    if (parts.length > 0) {
+      return parts.join("\n\n").trim();
+    }
+  }
+  if (typeof message.text === "string") {
+    return message.text.trim();
+  }
+  return null;
+}
+
+function extractNormalizedChatHistoryDisplayText(message: Record<string, unknown>): string | null {
+  const text = extractChatHistoryDisplayText(message);
+  if (!text) {
+    return null;
+  }
+  const normalized = stripInlineDirectiveTagsForDisplay(text).text.trim();
+  return normalized || null;
+}
+
+function hasChatHistoryRole(message: unknown, role: "assistant" | "user"): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  return typeof (message as { role?: unknown }).role === "string"
+    ? (message as { role: string }).role.toLowerCase() === role
+    : false;
+}
+
+function isSyntheticSessionResetPromptMessage(message: unknown): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  if (!hasChatHistoryRole(message, "user")) {
+    return false;
+  }
+  return (
+    extractNormalizedChatHistoryDisplayText(message as Record<string, unknown>) ===
+    BARE_SESSION_RESET_PROMPT
+  );
+}
+
+function isHiddenAssistantHistoryMessage(message: unknown): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  if (!hasChatHistoryRole(message, "assistant")) {
+    return false;
+  }
+  const rawText = extractChatHistoryDisplayText(message as Record<string, unknown>);
+  if (rawText === null) {
+    return false;
+  }
+  const text = extractNormalizedChatHistoryDisplayText(message as Record<string, unknown>);
+  if (!text) {
+    return true;
+  }
+  return isSilentReplyText(text, SILENT_REPLY_TOKEN);
+}
+
+function collapseLeadingAssistantPreamble(messages: unknown[]): unknown[] {
+  const firstUserIndex = messages.findIndex((message) => hasChatHistoryRole(message, "user"));
+  if (firstUserIndex < 0) {
+    return messages;
+  }
+
+  let lastAssistantIndex = -1;
+  for (let index = 0; index < firstUserIndex; index += 1) {
+    if (hasChatHistoryRole(messages[index], "assistant")) {
+      lastAssistantIndex = index;
+    }
+  }
+  if (lastAssistantIndex < 0) {
+    return messages;
+  }
+
+  let changed = false;
+  const next: unknown[] = [];
+  for (let index = 0; index < messages.length; index += 1) {
+    if (
+      index < firstUserIndex &&
+      hasChatHistoryRole(messages[index], "assistant") &&
+      index !== lastAssistantIndex
+    ) {
+      changed = true;
+      continue;
+    }
+    next.push(messages[index]);
+  }
+  return changed ? next : messages;
+}
+
 function sanitizeChatHistoryMessages(messages: unknown[]): unknown[] {
   if (messages.length === 0) {
     return messages;
   }
   let changed = false;
-  const next = messages.map((message) => {
+  const next: unknown[] = [];
+  for (const message of messages) {
+    if (isSyntheticSessionResetPromptMessage(message) || isHiddenAssistantHistoryMessage(message)) {
+      changed = true;
+      continue;
+    }
     const res = sanitizeChatHistoryMessage(message);
     changed ||= res.changed;
-    return res.message;
-  });
-  return changed ? next : messages;
+    next.push(res.message);
+  }
+  const base = changed ? next : messages;
+  return collapseLeadingAssistantPreamble(base);
 }
 
 function buildOversizedHistoryPlaceholder(message?: unknown): Record<string, unknown> {
@@ -448,6 +561,39 @@ function createChatAbortOps(context: GatewayRequestContext): ChatAbortOps {
   };
 }
 
+function sessionKeyMatchesActiveRun(params: {
+  activeSessionKey: string;
+  rawSessionKey: string;
+  canonicalSessionKey: string;
+}): boolean {
+  const active = params.activeSessionKey.trim();
+  const raw = params.rawSessionKey.trim();
+  const canonical = params.canonicalSessionKey.trim();
+  return active === raw || active === canonical;
+}
+
+function findActiveChatRunForSession(params: {
+  chatAbortControllers: Map<string, ChatAbortControllerEntry>;
+  rawSessionKey: string;
+  canonicalSessionKey: string;
+  excludeRunId?: string;
+}): { runId: string; active: ChatAbortControllerEntry } | null {
+  for (const [runId, active] of params.chatAbortControllers) {
+    if (params.excludeRunId && runId === params.excludeRunId) {
+      continue;
+    }
+    if (
+      sessionKeyMatchesActiveRun({
+        activeSessionKey: active.sessionKey,
+        rawSessionKey: params.rawSessionKey,
+        canonicalSessionKey: params.canonicalSessionKey,
+      })
+    ) {
+      return { runId, active };
+    }
+  }
+  return null;
+}
 function abortChatRunsForSessionKeyWithPartials(params: {
   context: GatewayRequestContext;
   ops: ChatAbortOps;
@@ -773,6 +919,24 @@ export const chatHandlers: GatewayRequestHandlers = {
       return;
     }
 
+    const activeSameSession = findActiveChatRunForSession({
+      chatAbortControllers: context.chatAbortControllers,
+      rawSessionKey,
+      canonicalSessionKey: sessionKey,
+      excludeRunId: clientRunId,
+    });
+    if (activeSameSession) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          `chat already in progress for session "${rawSessionKey}" (runId: ${activeSameSession.runId}). Wait for it to finish or send /stop first.`,
+        ),
+      );
+      return;
+    }
+
     try {
       const abortController = new AbortController();
       context.chatAbortControllers.set(clientRunId, {
@@ -888,7 +1052,14 @@ export const chatHandlers: GatewayRequestHandlers = {
               // late-joining clients (e.g. page refresh mid-response) receive
               // in-progress tool events without leaking cross-session data.
               for (const [activeRunId, active] of context.chatAbortControllers) {
-                if (activeRunId !== runId && active.sessionKey === p.sessionKey) {
+                if (
+                  activeRunId !== runId &&
+                  sessionKeyMatchesActiveRun({
+                    activeSessionKey: active.sessionKey,
+                    rawSessionKey: p.sessionKey,
+                    canonicalSessionKey: sessionKey,
+                  })
+                ) {
                   context.registerToolEventRecipient(activeRunId, connId);
                 }
               }
@@ -1053,3 +1224,6 @@ export const chatHandlers: GatewayRequestHandlers = {
     respond(true, { ok: true, messageId: appended.messageId });
   },
 };
+
+
+

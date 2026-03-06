@@ -1,9 +1,9 @@
-import { isLoopbackHost, normalizeHostHeader } from "./net.js";
+import { isLoopbackHost, isPrivateOrLoopbackHost, normalizeHostHeader } from "./net.js";
 
 type OriginCheckResult =
   | {
       ok: true;
-      matchedBy: "allowlist" | "host-header-fallback" | "local-loopback";
+      matchedBy: "allowlist" | "host-header-fallback" | "local-loopback" | "local-private-network";
     }
   | { ok: false; reason: string };
 
@@ -32,6 +32,7 @@ export function checkBrowserOrigin(params: {
   allowedOrigins?: string[];
   allowHostHeaderOriginFallback?: boolean;
   isLocalClient?: boolean;
+  isPrivateNetworkClient?: boolean;
 }): OriginCheckResult {
   const parsedOrigin = parseOrigin(params.origin);
   if (!parsedOrigin) {
@@ -52,6 +53,15 @@ export function checkBrowserOrigin(params: {
     parsedOrigin.host === requestHost
   ) {
     return { ok: true, matchedBy: "host-header-fallback" };
+  }
+
+  if (
+    params.isPrivateNetworkClient &&
+    requestHost &&
+    parsedOrigin.host === requestHost &&
+    isPrivateOrLoopbackHost(parsedOrigin.hostname)
+  ) {
+    return { ok: true, matchedBy: "local-private-network" };
   }
 
   // Dev fallback only for genuinely local socket clients, not Host-header claims.

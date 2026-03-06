@@ -27,26 +27,39 @@ export type ChatEventPayload = {
   errorMessage?: string;
 };
 
+export type SendChatMessageOptions = {
+  optimisticMessage?: string | null;
+  replaceHistory?: boolean;
+};
+
 export async function loadChatHistory(state: ChatState) {
   if (!state.client || !state.connected) {
     return;
   }
+  const requestedSessionKey = state.sessionKey;
   state.chatLoading = true;
   state.lastError = null;
   try {
     const res = await state.client.request<{ messages?: Array<unknown>; thinkingLevel?: string }>(
       "chat.history",
       {
-        sessionKey: state.sessionKey,
+        sessionKey: requestedSessionKey,
         limit: 200,
       },
     );
+    if (state.sessionKey !== requestedSessionKey) {
+      return;
+    }
     state.chatMessages = Array.isArray(res.messages) ? res.messages : [];
     state.chatThinkingLevel = res.thinkingLevel ?? null;
   } catch (err) {
-    state.lastError = String(err);
+    if (state.sessionKey === requestedSessionKey) {
+      state.lastError = String(err);
+    }
   } finally {
-    state.chatLoading = false;
+    if (state.sessionKey === requestedSessionKey) {
+      state.chatLoading = false;
+    }
   }
 }
 
@@ -111,11 +124,14 @@ export async function sendChatMessage(
   state: ChatState,
   message: string,
   attachments?: ChatAttachment[],
+  options?: SendChatMessageOptions,
 ): Promise<string | null> {
   if (!state.client || !state.connected) {
     return null;
   }
   const msg = message.trim();
+  const optimisticMessage =
+    options?.optimisticMessage === undefined ? msg : (options.optimisticMessage?.trim() ?? "");
   const hasAttachments = attachments && attachments.length > 0;
   if (!msg && !hasAttachments) {
     return null;
@@ -125,8 +141,8 @@ export async function sendChatMessage(
 
   // Build user message content blocks
   const contentBlocks: Array<{ type: string; text?: string; source?: unknown }> = [];
-  if (msg) {
-    contentBlocks.push({ type: "text", text: msg });
+  if (optimisticMessage) {
+    contentBlocks.push({ type: "text", text: optimisticMessage });
   }
   // Add image previews to the message for display
   if (hasAttachments) {
@@ -138,14 +154,19 @@ export async function sendChatMessage(
     }
   }
 
-  state.chatMessages = [
-    ...state.chatMessages,
-    {
-      role: "user",
-      content: contentBlocks,
-      timestamp: now,
-    },
-  ];
+  if (options?.replaceHistory) {
+    state.chatMessages = [];
+  }
+  if (contentBlocks.length > 0) {
+    state.chatMessages = [
+      ...state.chatMessages,
+      {
+        role: "user",
+        content: contentBlocks,
+        timestamp: now,
+      },
+    ];
+  }
 
   state.chatSending = true;
   state.lastError = null;

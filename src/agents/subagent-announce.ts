@@ -7,8 +7,11 @@ import {
   resolveAgentIdFromSessionKey,
   resolveMainSessionKey,
   resolveStorePath,
+  updateSessionStoreEntry,
 } from "../config/sessions.js";
 import { callGateway } from "../gateway/call.js";
+import { resolveSessionAgentId } from "./agent-scope.js";
+import { resolveMemorySearchConfig } from "./memory-search.js";
 import { createBoundDeliveryRouter } from "../infra/outbound/bound-delivery-router.js";
 import type { ConversationRef } from "../infra/outbound/session-binding-service.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
@@ -27,7 +30,14 @@ import {
   buildAnnounceIdempotencyKey,
   resolveQueueAnnounceId,
 } from "./announce-idempotency.js";
+import { applyDelegationDeltaToAgenticCounters } from "./agentic-counters.js";
 import { formatAgentInternalEventsForPrompt, type AgentInternalEvent } from "./internal-events.js";
+import {
+  buildDelegationContractPromptLines,
+  getSubagentReportWorkingSetText,
+  type SubagentDelegationRole,
+  type SubagentResponseFormat,
+} from "./subagent-result-contract.js";
 import {
   isEmbeddedPiRunActive,
   queueEmbeddedPiMessage,
@@ -39,7 +49,9 @@ import {
 } from "./subagent-announce-dispatch.js";
 import { type AnnounceQueueItem, enqueueAnnounce } from "./subagent-announce-queue.js";
 import { getSubagentDepthFromSessionStore } from "./subagent-depth.js";
+import { summarizeDelegationReportMetrics } from "./subagent-metrics.js";
 import type { SpawnSubagentMode } from "./subagent-spawn.js";
+import { addSubagentReportToWorkingSet } from "./tool-working-set.js";
 import { readLatestAssistantReply } from "./tools/agent-step.js";
 import { sanitizeTextContent, extractAssistantText } from "./tools/sessions-helpers.js";
 import { isAnnounceSkip } from "./tools/sessions-send-helpers.js";
@@ -52,6 +64,7 @@ const MAX_TIMER_SAFE_TIMEOUT_MS = 2_147_000_000;
 const DIRECT_ANNOUNCE_TRANSIENT_RETRY_DELAYS_MS = FAST_TEST_MODE
   ? ([8, 16, 32] as const)
   : ([5_000, 10_000, 20_000] as const);
+const MAX_AGENTIC_DEDUPE_IDS = 64;
 
 type ToolResultMessage = {
   role?: unknown;
@@ -78,24 +91,24 @@ function buildCompletionDeliveryMessage(params: {
     return "";
   }
   const hasFindings = findingsText.length > 0 && findingsText !== "(no output)";
-  // Cron completions are standalone messages — skip the subagent status header.
+  // Cron completions are standalone messages ? skip the subagent status header.
   if (params.announceType === "cron job") {
     return hasFindings ? findingsText : "";
   }
   const header = (() => {
     if (params.outcome?.status === "error") {
       return params.spawnMode === "session"
-        ? `❌ Subagent ${params.subagentName} failed this task (session remains active)`
-        : `❌ Subagent ${params.subagentName} failed`;
+        ? `? Subagent ${params.subagentName} failed this task (session remains active)`
+        : `? Subagent ${params.subagentName} failed`;
     }
     if (params.outcome?.status === "timeout") {
       return params.spawnMode === "session"
-        ? `⏱️ Subagent ${params.subagentName} timed out on this task (session remains active)`
-        : `⏱️ Subagent ${params.subagentName} timed out`;
+        ? `?? Subagent ${params.subagentName} timed out on this task (session remains active)`
+        : `?? Subagent ${params.subagentName} timed out`;
     }
     return params.spawnMode === "session"
-      ? `✅ Subagent ${params.subagentName} completed this task (session remains active)`
-      : `✅ Subagent ${params.subagentName} finished`;
+      ? `? Subagent ${params.subagentName} completed this task (session remains active)`
+      : `? Subagent ${params.subagentName} finished`;
   })();
   if (!hasFindings) {
     return header;
@@ -434,7 +447,7 @@ async function buildCompactAnnounceStatsLine(params: {
   if (typeof promptCache === "number" && promptCache > ioTotal) {
     parts.push(`prompt/cache ${formatTokenCount(promptCache)}`);
   }
-  return `Stats: ${parts.join(" • ")}`;
+  return `Stats: ${parts.join(" ? ")}`;
 }
 
 type DeliveryContextSource = Parameters<typeof deliveryContextFromSession>[0];
@@ -448,7 +461,7 @@ function resolveAnnounceOrigin(
   if (normalizedRequester?.channel && isInternalMessageChannel(normalizedRequester.channel)) {
     // Ignore internal channel hints (webchat) so a valid persisted route
     // can still be used for outbound delivery. Non-standard channels that
-    // are not in the deliverable list should NOT be stripped here — doing
+    // are not in the deliverable list should NOT be stripped here ? doing
     // so causes the session entry's stale lastChannel (often WhatsApp) to
     // override the actual requester origin, leading to delivery failures.
     return mergeDeliveryContext(
@@ -961,12 +974,61 @@ function loadSessionEntryByKey(sessionKey: string) {
   return store[sessionKey];
 }
 
+async function persistRequesterDelegationMetrics(params: {
+  sessionKey: string;
+  findings: string;
+  announceId?: string;
+}): Promise<void> {
+  const delta = summarizeDelegationReportMetrics(params.findings);
+  if (!delta) {
+    return;
+  }
+  try {
+    const cfg = loadConfig();
+    const agentId = resolveAgentIdFromSessionKey(params.sessionKey);
+    const storePath = resolveStorePath(cfg.session?.store, { agentId });
+    const announceId = params.announceId?.trim();
+    await updateSessionStoreEntry({
+      storePath,
+      sessionKey: params.sessionKey,
+      update: async (entry) => {
+        const recentIds = Array.isArray(entry.agenticDedupe?.delegationReportIds)
+          ? entry.agenticDedupe.delegationReportIds.filter(
+              (value): value is string => typeof value === "string" && value.trim().length > 0,
+            )
+          : [];
+        if (announceId && recentIds.includes(announceId)) {
+          return null;
+        }
+        return {
+          agenticCounters: applyDelegationDeltaToAgenticCounters(entry.agenticCounters, delta),
+          agenticDedupe: announceId
+            ? {
+                ...entry.agenticDedupe,
+                delegationReportIds: [
+                  announceId,
+                  ...recentIds.filter((value) => value !== announceId),
+                ].slice(0, MAX_AGENTIC_DEDUPE_IDS),
+              }
+            : entry.agenticDedupe,
+        };
+      },
+    });
+  } catch {
+    // Best-effort only.
+  }
+}
+
 export function buildSubagentSystemPrompt(params: {
   requesterSessionKey?: string;
   requesterOrigin?: DeliveryContext;
   childSessionKey: string;
   label?: string;
   task?: string;
+  role?: SubagentDelegationRole;
+  deliverable?: string;
+  acceptance?: string[];
+  responseFormat?: SubagentResponseFormat;
   /** Whether ACP-specific routing guidance should be included. Defaults to true. */
   acpEnabled?: boolean;
   /** Depth of the child being spawned (1 = sub-agent, 2 = sub-sub-agent). */
@@ -1011,6 +1073,12 @@ export function buildSubagentSystemPrompt(params: {
     `- Any relevant details the ${parentLabel} should know`,
     "- Keep it concise but informative",
     "",
+    ...buildDelegationContractPromptLines({
+      role: params.role,
+      deliverable: params.deliverable,
+      acceptance: params.acceptance,
+      responseFormat: params.responseFormat,
+    }),
     "## What You DON'T Do",
     `- NO user conversations (that's ${parentLabel}'s job)`,
     "- NO external messages (email, tweets, etc.) unless explicitly tasked with a specific recipient/channel",
@@ -1252,6 +1320,11 @@ export async function runSubagentAnnounceFlow(params: {
       });
     }
 
+    const announceId = buildAnnounceIdFromChildRun({
+      childSessionKey: params.childSessionKey,
+      childRunId: params.childRunId,
+    });
+
     // Build status label
     const statusLabel =
       outcome.status === "ok"
@@ -1268,6 +1341,7 @@ export async function runSubagentAnnounceFlow(params: {
     const subagentName = resolveAgentIdFromSessionKey(params.childSessionKey);
     const announceSessionId = childSessionId || "unknown";
     const findings = reply || "(no output)";
+    const workingSetText = getSubagentReportWorkingSetText(findings);
     let completionMessage = "";
     let triggerMessage = "";
     let steerMessage = "";
@@ -1278,13 +1352,13 @@ export async function runSubagentAnnounceFlow(params: {
     // requester (typically main) so descendant completion is not silently lost.
     // BUT: only fallback if the parent SESSION is deleted, not just if the current
     // run ended. A parent waiting for child results has no active run but should
-    // still receive the announce — injecting will start a new agent turn.
+    // still receive the announce ? injecting will start a new agent turn.
     if (requesterIsSubagent) {
       const { isSubagentSessionRunActive, resolveRequesterForChildSession } =
         await import("./subagent-registry.js");
       if (!isSubagentSessionRunActive(targetRequesterSessionKey)) {
         // Parent run has ended. Check if parent SESSION still exists.
-        // If it does, the parent may be waiting for child results — inject there.
+        // If it does, the parent may be waiting for child results ? inject there.
         const parentSessionEntry = loadSessionEntryByKey(targetRequesterSessionKey);
         const parentSessionAlive =
           parentSessionEntry &&
@@ -1292,7 +1366,7 @@ export async function runSubagentAnnounceFlow(params: {
           parentSessionEntry.sessionId.trim();
 
         if (!parentSessionAlive) {
-          // Parent session is truly gone — fallback to grandparent
+          // Parent session is truly gone ? fallback to grandparent
           const fallback = resolveRequesterForChildSession(targetRequesterSessionKey);
           if (!fallback?.requesterSessionKey) {
             // Without a requester fallback we cannot safely deliver this nested
@@ -1310,6 +1384,36 @@ export async function runSubagentAnnounceFlow(params: {
         // If parent session is alive (just has no active run), continue with parent
         // as target. Injecting the announce will start a new agent turn for processing.
       }
+    }
+
+    if (workingSetText && findings !== "(no output)") {
+      try {
+        const cfg = loadConfig();
+        const requesterAgentId = resolveSessionAgentId({
+          sessionKey: targetRequesterSessionKey,
+          config: cfg,
+        });
+        const workingSetConfig = requesterAgentId
+          ? resolveMemorySearchConfig(cfg, requesterAgentId)?.workingSet
+          : undefined;
+        addSubagentReportToWorkingSet({
+          sessionKey: targetRequesterSessionKey,
+          text: workingSetText,
+          config: workingSetConfig,
+          path: `subagent/${subagentName}/${taskLabel}`,
+          toolName: "subagent",
+        });
+      } catch {
+        // Best-effort working-set indexing only.
+      }
+    }
+
+    if (findings !== "(no output)") {
+      await persistRequesterDelegationMetrics({
+        sessionKey: targetRequesterSessionKey,
+        findings,
+        announceId,
+      });
     }
 
     let remainingActiveSubagentRuns = 0;
@@ -1358,10 +1462,6 @@ export async function runSubagentAnnounceFlow(params: {
     triggerMessage = buildAnnounceSteerMessage(internalEvents);
     steerMessage = triggerMessage;
 
-    const announceId = buildAnnounceIdFromChildRun({
-      childSessionKey: params.childSessionKey,
-      childRunId: params.childRunId,
-    });
     // Send to the requester session. For nested subagents this is an internal
     // follow-up injection (deliver=false) so the orchestrator receives it.
     let directOrigin = targetRequesterOrigin;

@@ -121,6 +121,42 @@ export type SessionModelUsage = {
   totals: CostUsageTotals;
 };
 
+export type SessionMemorySearchSummary = {
+  calls: number;
+  lastIntent?: string;
+  lastStrategy?: string;
+  lastSourceBias?: string;
+  lastQueryCount?: number;
+  lastProvider?: string;
+  lastModel?: string;
+  lastConfidenceScore?: number;
+  lastConfidenceLevel?: string;
+  workingSetEnabled?: boolean;
+  workingSetHits: number;
+  hitCalls: number;
+  lastWorkingSetHits?: number;
+  transientOnly?: boolean;
+};
+
+export type SessionDelegationRoleCount = {
+  role: string;
+  count: number;
+};
+
+export type SessionDelegationSummary = {
+  spawnCalls: number;
+  accepted: number;
+  structuredResponses: number;
+  readOnlySpawns: number;
+  roles: SessionDelegationRoleCount[];
+  modelsApplied: string[];
+};
+
+export type SessionAgenticSummary = {
+  memorySearch?: SessionMemorySearchSummary;
+  delegation?: SessionDelegationSummary;
+};
+
 export type SessionCostSummary = CostUsageTotals & {
   sessionId?: string;
   sessionFile?: string;
@@ -136,6 +172,7 @@ export type SessionCostSummary = CostUsageTotals & {
   toolUsage?: SessionToolUsage;
   modelUsage?: SessionModelUsage[];
   latency?: SessionLatencyStats;
+  agentic?: SessionAgenticSummary;
 };
 
 export type DiscoveredSession = {

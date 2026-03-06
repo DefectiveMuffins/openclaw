@@ -128,7 +128,7 @@ export type MediaToolsConfig = {
   video?: MediaUnderstandingConfig;
 };
 
-export type ToolProfileId = "minimal" | "coding" | "messaging" | "full";
+export type ToolProfileId = "minimal" | "coding" | "messaging" | "orchestrator" | "full";
 
 export type ToolLoopDetectionDetectorConfig = {
   /** Enable warning/blocking for repeated identical calls to the same tool/params. */
@@ -140,7 +140,7 @@ export type ToolLoopDetectionDetectorConfig = {
 };
 
 export type ToolLoopDetectionConfig = {
-  /** Enable tool-loop protection (default: false). */
+  /** Enable tool-loop protection (default: true). */
   enabled?: boolean;
   /** Maximum tool call history entries retained for loop detection (default: 30). */
   historySize?: number;
@@ -152,6 +152,24 @@ export type ToolLoopDetectionConfig = {
   globalCircuitBreakerThreshold?: number;
   /** Detector toggles. */
   detectors?: ToolLoopDetectionDetectorConfig;
+};
+
+export type ToolResultCacheConfig = {
+  /** Enable per-session tool-result caching for selected read-only tools (default: false). */
+  enabled?: boolean;
+  /** Cache entry TTL in milliseconds (default: 30000). */
+  ttlMs?: number;
+  /** Maximum cached entries retained per session (default: 100). */
+  maxEntries?: number;
+  /** Cacheable tool allowlist. Defaults to read-only tools when omitted. */
+  cacheableTools?: string[];
+};
+
+export type ParallelExecutionConfig = {
+  /** Enable parallel execution for independent tool calls (default: false). */
+  enabled?: boolean;
+  /** Maximum number of tool calls to execute concurrently (default: 5). */
+  maxConcurrent?: number;
 };
 
 export type SessionsToolsVisibility = "self" | "tree" | "agent" | "all";
@@ -221,6 +239,15 @@ export type ExecToolConfig = {
   security?: "deny" | "allowlist" | "full";
   /** Exec ask mode (default: on-miss). */
   ask?: "off" | "on-miss" | "always";
+  /** Block known destructive shell commands before execution (default: false). */
+  blockDestructive?: boolean;
+  /**
+   * Destructive command handling mode:
+   * - "block": reject immediately
+   * - "approve": require human approval before execution
+   * Default: "block"
+   */
+  destructiveMode?: "block" | "approve";
   /** Default node binding for exec.host=node (node id/name). */
   node?: string;
   /** Directories to prepend to PATH when running exec (gateway/sandbox). */
@@ -269,6 +296,21 @@ export type FsToolsConfig = {
    * Default: false (unrestricted, matches legacy behavior).
    */
   workspaceOnly?: boolean;
+  /**
+   * Whitelist of allowed paths (relative to workspace unless absolute).
+   * When set, paths outside this list are denied.
+   */
+  allowPaths?: string[];
+  /**
+   * Blacklist of denied paths (relative to workspace unless absolute).
+   * Deny rules take precedence over allow paths.
+   */
+  denyPaths?: string[];
+  /**
+   * Paths that are read-only (reads allowed, writes denied).
+   * Relative to workspace unless absolute.
+   */
+  readOnlyPaths?: string[];
 };
 
 export type AgentToolsConfig = {
@@ -293,6 +335,10 @@ export type AgentToolsConfig = {
   fs?: FsToolsConfig;
   /** Runtime loop detection for repetitive/ stuck tool-call patterns. */
   loopDetection?: ToolLoopDetectionConfig;
+  /** Optional tool-result cache for repeated read-only calls. */
+  toolResultCache?: ToolResultCacheConfig;
+  /** Optional parallel tool execution controls. */
+  parallelExecution?: ParallelExecutionConfig;
   sandbox?: {
     tools?: {
       allow?: string[];
@@ -383,6 +429,15 @@ export type MemorySearchConfig = {
   query?: {
     maxResults?: number;
     minScore?: number;
+    /** Retrieval planning and query fan-out behavior. */
+    routing?: {
+      /** Enable query planning and source/strategy auto-routing (default: false). */
+      enabled?: boolean;
+      /** Maximum number of rewritten queries issued for deep recall (default: 3). */
+      maxQueries?: number;
+      /** Minimum query length before auto-routing can choose deep recall (default: 80). */
+      deepQueryThreshold?: number;
+    };
     hybrid?: {
       /** Enable hybrid BM25 + vector search (default: true). */
       enabled?: boolean;
@@ -408,6 +463,17 @@ export type MemorySearchConfig = {
       };
     };
   };
+  /** Transient working-set recall built from recent tool outputs and subagent reports. */
+  workingSet?: {
+    /** Enable in-session semantic recall over recent tool outputs and subagent reports (default: false). */
+    enabled?: boolean;
+    /** Working-set sources to index (default: ["toolResults", "subagentReports"]). */
+    sources?: Array<"toolResults" | "subagentReports">;
+    /** Entry TTL in milliseconds before working-set evidence expires (default: 1800000). */
+    ttlMs?: number;
+    /** Maximum retained working-set entries per session (default: 200). */
+    maxEntries?: number;
+  };
   /** Index cache behavior. */
   cache?: {
     /** Cache chunk embeddings in SQLite (default: true). */
@@ -428,10 +494,10 @@ export type ToolsConfig = {
   byProvider?: Record<string, ToolPolicyConfig>;
   web?: {
     search?: {
-      /** Enable web search tool (default: true when API key is present). */
+      /** Enable web search tool (default: true; falls back to DuckDuckGo when no keyed provider is configured). */
       enabled?: boolean;
-      /** Search provider ("brave", "perplexity", "grok", "gemini", or "kimi"). */
-      provider?: "brave" | "perplexity" | "grok" | "gemini" | "kimi";
+      /** Search provider ("brave", "perplexity", "grok", "gemini", "kimi", or "duckduckgo"). */
+      provider?: "brave" | "perplexity" | "grok" | "gemini" | "kimi" | "duckduckgo";
       /** Brave Search API key (optional; defaults to BRAVE_API_KEY env var). */
       apiKey?: string;
       /** Default search results count (1-10). */
@@ -571,6 +637,10 @@ export type ToolsConfig = {
   fs?: FsToolsConfig;
   /** Runtime loop detection for repetitive/ stuck tool-call patterns. */
   loopDetection?: ToolLoopDetectionConfig;
+  /** Optional tool-result cache for repeated read-only calls. */
+  toolResultCache?: ToolResultCacheConfig;
+  /** Optional parallel tool execution controls. */
+  parallelExecution?: ParallelExecutionConfig;
   /** Sub-agent tool policy defaults (deny wins). */
   subagents?: {
     /** Default model selection for spawned sub-agents (string or {primary,fallbacks}). */
@@ -590,3 +660,5 @@ export type ToolsConfig = {
     };
   };
 };
+
+

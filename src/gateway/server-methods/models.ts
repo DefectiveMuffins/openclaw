@@ -23,6 +23,7 @@ export const modelsHandlers: GatewayRequestHandlers = {
       return;
     }
     try {
+      const includeAll = (params as { includeAll?: boolean }).includeAll === true;
       const catalog = await context.loadGatewayModelCatalog();
       const cfg = loadConfig();
       const { allowedCatalog } = buildAllowedModelSet({
@@ -30,10 +31,11 @@ export const modelsHandlers: GatewayRequestHandlers = {
         catalog,
         defaultProvider: DEFAULT_PROVIDER,
       });
-      const models = allowedCatalog.length > 0 ? allowedCatalog : catalog;
+      const models = includeAll ? catalog : allowedCatalog.length > 0 ? allowedCatalog : catalog;
       respond(true, { models }, undefined);
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }
   },
 };
+

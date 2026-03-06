@@ -407,6 +407,25 @@ describe("createOpenClawCodingTools", () => {
     expect(names.has("exec")).toBe(false);
     expect(names.has("browser")).toBe(false);
   });
+  it("supports orchestrator tool profile", () => {
+    const tools = createOpenClawCodingTools({
+      config: { tools: { profile: "orchestrator" } },
+    });
+    const names = new Set(tools.map((tool) => tool.name));
+
+    expect(names.has("read")).toBe(true);
+    expect(names.has("write")).toBe(true);
+    expect(names.has("edit")).toBe(true);
+    expect(names.has("sessions_spawn")).toBe(true);
+    expect(names.has("subagents")).toBe(true);
+    expect(names.has("message")).toBe(true);
+    expect(names.has("session_status")).toBe(true);
+    expect(names.has("agents_list")).toBe(true);
+
+    expect(names.has("exec")).toBe(false);
+    expect(names.has("process")).toBe(false);
+    expect(names.has("apply_patch")).toBe(false);
+  });
   it("expands group shorthands in global tool policy", () => {
     const tools = createOpenClawCodingTools({
       config: { tools: { allow: ["group:fs"] } },

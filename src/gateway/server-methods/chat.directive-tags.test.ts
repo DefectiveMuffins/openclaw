@@ -202,13 +202,7 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
     mockState.agentRunId = "run-current";
     const respond = vi.fn();
     const context = createChatContext();
-    context.chatAbortControllers.set("run-same-session", {
-      controller: new AbortController(),
-      sessionId: "sess-prev",
-      sessionKey: "main",
-      startedAtMs: Date.now(),
-      expiresAtMs: Date.now() + 10_000,
-    });
+
     context.chatAbortControllers.set("run-other-session", {
       controller: new AbortController(),
       sessionId: "sess-other",
@@ -230,7 +224,6 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
 
     const register = context.registerToolEventRecipient as unknown as ReturnType<typeof vi.fn>;
     expect(register).toHaveBeenCalledWith("run-current", "conn-1");
-    expect(register).toHaveBeenCalledWith("run-same-session", "conn-1");
     expect(register).not.toHaveBeenCalledWith("run-other-session", "conn-1");
   });
 
@@ -257,6 +250,40 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
     expect(register).not.toHaveBeenCalled();
   });
 
+  it("rejects a second chat.send while the same session already has an active run", async () => {
+    createTranscriptFixture("openclaw-chat-send-duplicate-session-");
+    mockState.finalText = "should not dispatch";
+    const respond = vi.fn();
+    const context = createChatContext();
+    context.chatAbortControllers.set("run-existing", {
+      controller: new AbortController(),
+      sessionId: "sess-prev",
+      sessionKey: "main",
+      startedAtMs: Date.now(),
+      expiresAtMs: Date.now() + 10_000,
+    });
+
+    await chatHandlers["chat.send"]({
+      params: {
+        sessionKey: "main",
+        message: "hello again",
+        idempotencyKey: "idem-duplicate-session",
+      },
+      respond: respond as unknown as Parameters<(typeof chatHandlers)["chat.send"]>[0]["respond"],
+      req: {} as never,
+      client: null as never,
+      isWebchatConnect: () => false,
+      context: context as GatewayRequestContext,
+    });
+
+    const [ok, payload, error] = respond.mock.calls.at(-1) ?? [];
+    expect(ok).toBe(false);
+    expect(payload).toBeUndefined();
+    expect(String(error?.message ?? "")).toContain("chat already in progress for session");
+    expect(mockState.lastDispatchCtx).toBeUndefined();
+    expect(context.broadcast).not.toHaveBeenCalled();
+    expect(context.dedupe.has("chat:idem-duplicate-session")).toBe(false);
+  });
   it("chat.inject keeps message defined when directive tag is the only content", async () => {
     createTranscriptFixture("openclaw-chat-inject-directive-only-");
     const respond = vi.fn();
@@ -412,3 +439,4 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
     );
   });
 });
+

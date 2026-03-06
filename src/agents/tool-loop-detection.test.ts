@@ -207,7 +207,7 @@ describe("tool-loop-detection", () => {
   });
 
   describe("detectToolCallLoop", () => {
-    it("is disabled by default", () => {
+    it("is enabled by default", () => {
       const state = createState();
 
       for (let i = 0; i < 20; i += 1) {
@@ -215,7 +215,11 @@ describe("tool-loop-detection", () => {
       }
 
       const loopResult = detectToolCallLoop(state, "read", { path: "/same.txt" });
-      expect(loopResult.stuck).toBe(false);
+      expect(loopResult.stuck).toBe(true);
+      if (loopResult.stuck) {
+        expect(loopResult.level).toBe("warning");
+        expect(loopResult.detector).toBe("generic_repeat");
+      }
     });
 
     it("does not flag unique tool calls", () => {
@@ -572,3 +576,4 @@ describe("tool-loop-detection", () => {
     });
   });
 });
+

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../../config/config.js";
-import { resolveMemoryFlushPromptForRun } from "./memory-flush.js";
+import { resolveMemoryFlushPromptForRun, shouldRunMemoryFlush } from "./memory-flush.js";
 
 describe("resolveMemoryFlushPromptForRun", () => {
   const cfg = {
@@ -33,5 +33,61 @@ describe("resolveMemoryFlushPromptForRun", () => {
 
     expect(prompt).toContain("Current time: already present");
     expect((prompt.match(/Current time:/g) ?? []).length).toBe(1);
+  });
+});
+
+describe("shouldRunMemoryFlush", () => {
+  it("triggers when periodic turn interval is exceeded", () => {
+    const shouldFlush = shouldRunMemoryFlush({
+      entry: {
+        totalTokens: 100,
+        totalTokensFresh: 100,
+        memoryFlushTurnCount: 6,
+      },
+      contextWindowTokens: 100_000,
+      reserveTokensFloor: 1_000,
+      softThresholdTokens: 4_000,
+      periodicTurnInterval: 5,
+      periodicMinutes: 0,
+    });
+
+    expect(shouldFlush).toBe(true);
+  });
+
+  it("does not trigger on turn interval boundary", () => {
+    const shouldFlush = shouldRunMemoryFlush({
+      entry: {
+        totalTokens: 100,
+        totalTokensFresh: 100,
+        memoryFlushTurnCount: 5,
+      },
+      contextWindowTokens: 100_000,
+      reserveTokensFloor: 1_000,
+      softThresholdTokens: 4_000,
+      periodicTurnInterval: 5,
+      periodicMinutes: 0,
+    });
+
+    expect(shouldFlush).toBe(false);
+  });
+
+  it("triggers when periodic minutes elapsed since last flush", () => {
+    const nowMs = Date.UTC(2026, 1, 16, 15, 0, 0);
+    const shouldFlush = shouldRunMemoryFlush({
+      entry: {
+        totalTokens: 100,
+        totalTokensFresh: 100,
+        memoryFlushTurnCount: 0,
+        memoryFlushAt: nowMs - 31 * 60 * 1000,
+      },
+      contextWindowTokens: 100_000,
+      reserveTokensFloor: 1_000,
+      softThresholdTokens: 4_000,
+      periodicTurnInterval: 0,
+      periodicMinutes: 30,
+      nowMs,
+    });
+
+    expect(shouldFlush).toBe(true);
   });
 });

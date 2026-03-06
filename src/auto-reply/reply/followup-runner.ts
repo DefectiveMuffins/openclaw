@@ -230,6 +230,7 @@ export function createFollowupRunner(params: {
           modelUsed,
           providerUsed: fallbackProvider,
           contextTokensUsed,
+          routing: runResult.meta?.agentMeta?.routing ?? null,
           logLabel: "followup",
         });
       }

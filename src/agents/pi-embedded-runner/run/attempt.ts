@@ -12,6 +12,7 @@ import { resolveChannelCapabilities } from "../../../config/channel-capabilities
 import type { OpenClawConfig } from "../../../config/config.js";
 import { getMachineDisplayName } from "../../../infra/machine-name.js";
 import { MAX_IMAGE_BYTES } from "../../../media/constants.js";
+import { auditMemoryStaleness } from "../../../memory/staleness-audit.js";
 import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
 import type {
   PluginHookAgentContext,
@@ -56,6 +57,7 @@ import { subscribeEmbeddedPiSession } from "../../pi-embedded-subscribe.js";
 import { createPreparedEmbeddedPiSettingsManager } from "../../pi-project-settings.js";
 import { toClientToolDefinitions } from "../../pi-tool-definition-adapter.js";
 import { createOpenClawCodingTools, resolveToolLoopDetectionConfig } from "../../pi-tools.js";
+import { resolveEffectiveToolPolicy } from "../../pi-tools.policy.js";
 import { resolveSandboxContext } from "../../sandbox.js";
 import { resolveSandboxRuntimeStatus } from "../../sandbox/runtime-status.js";
 import { repairSessionFileIfNeeded } from "../../session-file-repair.js";
@@ -77,6 +79,7 @@ import { buildSystemPromptReport } from "../../system-prompt-report.js";
 import { sanitizeToolCallIdsForCloudCodeAssist } from "../../tool-call-id.js";
 import { resolveEffectiveToolFsWorkspaceOnly } from "../../tool-fs-policy.js";
 import { normalizeToolName } from "../../tool-policy.js";
+import { invalidateToolResultCache } from "../../tool-result-cache.js";
 import { resolveTranscriptPolicy } from "../../transcript-policy.js";
 import { DEFAULT_BOOTSTRAP_FILENAME } from "../../workspace.js";
 import { isRunnerAbortError } from "../abort.js";
@@ -543,6 +546,7 @@ export async function runEmbeddedAttempt(
         contextMode: params.bootstrapContextMode,
         runKind: params.bootstrapContextRunKind,
       });
+    const memoryStaleness = await auditMemoryStaleness(effectiveWorkspace);
     const workspaceNotes = hookAdjustedBootstrapFiles.some(
       (file) => file.name === DEFAULT_BOOTSTRAP_FILENAME && !file.missing,
     )
@@ -556,6 +560,14 @@ export async function runEmbeddedAttempt(
       config: params.config,
       agentId: params.agentId,
     });
+    const effectiveToolPolicy = resolveEffectiveToolPolicy({
+      config: params.config,
+      sessionKey: sandboxSessionKey,
+      agentId: sessionAgentId,
+      modelProvider: params.model.provider,
+      modelId: params.modelId,
+    });
+    const toolProfile = effectiveToolPolicy.providerProfile ?? effectiveToolPolicy.profile;
     const effectiveFsWorkspaceOnly = resolveAttemptFsWorkspaceOnly({
       config: params.config,
       sessionAgentId,
@@ -737,6 +749,8 @@ export async function runEmbeddedAttempt(
       userTimeFormat,
       contextFiles,
       memoryCitationsMode: params.config?.memory?.citations,
+      toolProfile,
+      memoryStalenessHint: memoryStaleness.hint,
     });
     const systemPromptReport = buildSystemPromptReport({
       source: "run",
@@ -1457,6 +1471,9 @@ export async function runEmbeddedAttempt(
         }
 
         const compactionOccurredThisAttempt = getCompactionCount() > 0;
+        if (compactionOccurredThisAttempt) {
+          invalidateToolResultCache(sandboxSessionKey);
+        }
 
         // Append cache-TTL timestamp AFTER prompt + compaction retry completes.
         // Previously this was before the prompt, which caused a custom entry to be
@@ -1655,3 +1672,4 @@ export async function runEmbeddedAttempt(
     process.chdir(prevCwd);
   }
 }
+

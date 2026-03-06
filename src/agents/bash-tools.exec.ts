@@ -7,8 +7,9 @@ import {
   getShellPathFromLoginShell,
   resolveShellEnvFallbackTimeoutMs,
 } from "../infra/shell-env.js";
-import { logInfo } from "../logger.js";
+import { logInfo, logWarn } from "../logger.js";
 import { parseAgentSessionKey, resolveAgentIdFromSessionKey } from "../routing/session-key.js";
+import { isDestructiveCommand } from "../security/destructive-command-detector.js";
 import { markBackgrounded } from "./bash-process-registry.js";
 import { processGatewayAllowlist } from "./bash-tools.exec-host-gateway.js";
 import { executeNodeHostCommand } from "./bash-tools.exec-host-node.js";
@@ -146,6 +147,29 @@ async function validateScriptFileForShellBleed(params: {
       );
     }
   }
+}
+
+function buildBlockedDestructiveResult(params: {
+  command: string;
+  pattern?: string;
+  mode: "block" | "approve";
+  cwd?: string;
+}): AgentToolResult<ExecToolDetails> {
+  const patternText = params.pattern ? ` (${params.pattern})` : "";
+  const text =
+    params.mode === "approve"
+      ? `Command blocked: destructive command detected${patternText}, but approval routing is unavailable for this exec host.\nCommand: ${params.command}`
+      : `Command blocked: destructive command detected${patternText}.\nCommand: ${params.command}`;
+  return {
+    content: [{ type: "text", text }],
+    details: {
+      status: "failed",
+      exitCode: null,
+      durationMs: 0,
+      aggregated: text,
+      cwd: params.cwd,
+    },
+  };
 }
 
 export function createExecTool(
@@ -358,6 +382,49 @@ export function createExecTool(
         containerWorkdir = resolved.containerWorkdir;
       } else {
         workdir = resolveWorkdir(rawWorkdir, warnings);
+      }
+
+      const destructiveCheck = isDestructiveCommand(params.command);
+      const blockDestructive = defaults?.blockDestructive === true;
+      const destructiveMode = defaults?.destructiveMode === "approve" ? "approve" : "block";
+      if (blockDestructive && destructiveCheck.destructive) {
+        const detectedPattern = destructiveCheck.pattern;
+        if (security === "full") {
+          logWarn(
+            `exec: allowing destructive command under security=full (${detectedPattern ?? "pattern-unknown"})`,
+          );
+          warnings.push(
+            `Warning: destructive command detected (${detectedPattern ?? "pattern-unknown"}) but allowed because tools.exec.security=full.`,
+          );
+        } else if (destructiveMode === "block") {
+          return buildBlockedDestructiveResult({
+            command: params.command,
+            pattern: detectedPattern,
+            mode: "block",
+            cwd: workdir,
+          });
+        } else {
+          // Route known destructive operations through explicit human approval.
+          // host=sandbox with an active sandbox runtime cannot use host approvals safely.
+          if (host === "sandbox" && sandbox) {
+            return buildBlockedDestructiveResult({
+              command: params.command,
+              pattern: detectedPattern,
+              mode: "approve",
+              cwd: workdir,
+            });
+          }
+          if (host === "sandbox" && !sandbox) {
+            host = "gateway";
+            warnings.push(
+              "Warning: destructive command approval requires host=gateway; routing this command through gateway approvals.",
+            );
+          }
+          ask = "always";
+          warnings.push(
+            `Warning: destructive command detected (${detectedPattern ?? "pattern-unknown"}); explicit approval required.`,
+          );
+        }
       }
 
       const inheritedBaseEnv = coerceEnv(process.env);

@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, test, vi } from "vitest";
+import { BARE_SESSION_RESET_PROMPT } from "../auto-reply/reply/session-reset-prompt.js";
 import type { GetReplyOptions } from "../auto-reply/types.js";
 import { __setMaxChatHistoryMessagesBytesForTest } from "./server-constants.js";
 import {
@@ -273,6 +274,128 @@ describe("gateway server chat", () => {
     });
   });
 
+  test("chat.history omits synthetic bare reset prompts", async () => {
+    await withGatewayChatHarness(async ({ ws, createSessionDir }) => {
+      await connectOk(ws);
+
+      const sessionDir = await createSessionDir();
+      await writeMainSessionStore();
+
+      const lines = [
+        JSON.stringify({
+          message: {
+            role: "user",
+            content: [{ type: "text", text: BARE_SESSION_RESET_PROMPT }],
+            timestamp: Date.now(),
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Hey Dan — I’m here and ready to help." }],
+            timestamp: Date.now() + 1,
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "user",
+            content: [{ type: "text", text: BARE_SESSION_RESET_PROMPT }],
+            timestamp: Date.now() + 2,
+          },
+        }),
+      ];
+      await writeMainSessionTranscript(sessionDir, lines);
+      const messages = await fetchHistoryMessages(ws);
+
+      expect(messages).toHaveLength(1);
+      expect(JSON.stringify(messages)).not.toContain(BARE_SESSION_RESET_PROMPT);
+      expect(messages[0]).toMatchObject({
+        role: "assistant",
+        content: [{ type: "text", text: "Hey Dan — I’m here and ready to help." }],
+      });
+    });
+  });
+
+  test("chat.history keeps only the latest visible startup assistant message", async () => {
+    await withGatewayChatHarness(async ({ ws, createSessionDir }) => {
+      await connectOk(ws);
+
+      const sessionDir = await createSessionDir();
+      await writeMainSessionStore();
+
+      const lines = [
+        JSON.stringify({
+          message: {
+            role: "user",
+            content: [{ type: "text", text: BARE_SESSION_RESET_PROMPT }],
+            timestamp: Date.now(),
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Hey there! I'm ready to help." }],
+            timestamp: Date.now() + 1,
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "NO_REPLY" }],
+            timestamp: Date.now() + 2,
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Hey! Ready to tackle whatever you've got on your plate." }],
+            timestamp: Date.now() + 3,
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "Do you need any info about me before we get started?" }],
+            timestamp: Date.now() + 4,
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "I have your timezone already, but share any preferences you want me to keep in mind." }],
+            timestamp: Date.now() + 5,
+          },
+        }),
+      ];
+      await writeMainSessionTranscript(sessionDir, lines);
+      const messages = await fetchHistoryMessages(ws);
+
+      expect(messages).toHaveLength(3);
+      expect(messages).toMatchObject([
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "Hey! Ready to tackle whatever you've got on your plate." }],
+        },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Do you need any info about me before we get started?" },
+          ],
+        },
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "text",
+              text: "I have your timezone already, but share any preferences you want me to keep in mind.",
+            },
+          ],
+        },
+      ]);
+      expect(JSON.stringify(messages)).not.toContain("NO_REPLY");
+      expect(JSON.stringify(messages)).not.toContain(BARE_SESSION_RESET_PROMPT);
+    });
+  });
   test("chat.history strips inline directives from displayed message text", async () => {
     await withGatewayChatHarness(async ({ ws, createSessionDir }) => {
       await connectOk(ws);
@@ -417,3 +540,4 @@ describe("gateway server chat", () => {
     });
   });
 });
+

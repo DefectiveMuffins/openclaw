@@ -6,6 +6,7 @@ import { normalizeAgentId } from "../routing/session-key.js";
 import { resolveThreadParentSessionKey } from "../sessions/session-key-utils.js";
 import { normalizeMessageChannel } from "../utils/message-channel.js";
 import { resolveAgentConfig, resolveAgentIdFromSessionKey } from "./agent-scope.js";
+import { shouldForceTopLevelDelegation } from "./delegation-enforcement.js";
 import { compileGlobPatterns, matchesAnyGlobPattern } from "./glob-pattern.js";
 import type { AnyAgentTool } from "./pi-tools.types.js";
 import { pickSandboxToolPolicy } from "./sandbox-tool-policy.js";
@@ -196,6 +197,7 @@ function resolveProviderToolPolicy(params: {
   return undefined;
 }
 
+
 export function resolveEffectiveToolPolicy(params: {
   config?: OpenClawConfig;
   sessionKey?: string;
@@ -215,7 +217,9 @@ export function resolveEffectiveToolPolicy(params: {
   const agentTools = agentConfig?.tools;
   const globalTools = params.config?.tools;
 
-  const profile = agentTools?.profile ?? globalTools?.profile;
+  const profile = shouldForceTopLevelDelegation(params.sessionKey)
+    ? "orchestrator"
+    : agentTools?.profile ?? globalTools?.profile;
   const providerPolicy = resolveProviderToolPolicy({
     byProvider: globalTools?.byProvider,
     modelProvider: params.modelProvider,
@@ -313,3 +317,4 @@ export function isToolAllowedByPolicies(
 ) {
   return policies.every((policy) => isToolAllowedByPolicyName(name, policy));
 }
+

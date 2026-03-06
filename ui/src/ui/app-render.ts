@@ -8,7 +8,7 @@ import type { AppViewState } from "./app-view-state.ts";
 import { loadAgentFileContent, loadAgentFiles, saveAgentFile } from "./controllers/agent-files.ts";
 import { loadAgentIdentities, loadAgentIdentity } from "./controllers/agent-identity.ts";
 import { loadAgentSkills } from "./controllers/agent-skills.ts";
-import { loadAgents, loadToolsCatalog } from "./controllers/agents.ts";
+import { loadAgentModelChoices, loadAgents, loadToolsCatalog } from "./controllers/agents.ts";
 import { loadChannels } from "./controllers/channels.ts";
 import { loadChatHistory } from "./controllers/chat.ts";
 import {
@@ -545,6 +545,7 @@ export function renderApp(state: AppViewState) {
                 selectedAgentId: resolvedAgentId,
                 activePanel: state.agentsPanel,
                 configForm: configValue,
+                modelChoices: state.agentModelChoices,
                 configLoading: state.configLoading,
                 configSaving: state.configSaving,
                 configDirty: state.configFormDirty,
@@ -576,6 +577,7 @@ export function renderApp(state: AppViewState) {
                 skillsFilter: state.skillsFilter,
                 onRefresh: async () => {
                   await loadAgents(state);
+                  await loadAgentModelChoices(state);
                   const nextSelected =
                     state.agentsSelectedId ??
                     state.agentsList?.defaultId ??
@@ -1166,3 +1168,4 @@ export function renderApp(state: AppViewState) {
     </div>
   `;
 }
+

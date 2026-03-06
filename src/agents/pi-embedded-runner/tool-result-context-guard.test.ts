@@ -268,4 +268,27 @@ describe("installToolResultContextGuard", () => {
     expect(oldResult.details).toBeUndefined();
     expect(newResult.details).toBeUndefined();
   });
+
+  it("prefers compacting low-relevance tool results before older relevant results", async () => {
+    const agent = makeGuardableAgent();
+
+    installToolResultContextGuard({
+      agent,
+      contextWindowTokens: 1_000,
+    });
+
+    const contextForNextCall = [
+      makeUser("Keep focus on activeWork() " + "u".repeat(1_600)),
+      makeToolResult("call_old_relevant", "activeWork() details " + "a".repeat(500)),
+      makeToolResult("call_new_irrelevant", "otherWork() details " + "b".repeat(500)),
+    ];
+
+    await agent.transformContext?.(contextForNextCall, new AbortController().signal);
+
+    const oldRelevantText = getToolResultText(contextForNextCall[1]);
+    const newIrrelevantText = getToolResultText(contextForNextCall[2]);
+
+    expect(oldRelevantText).toContain("activeWork()");
+    expect(newIrrelevantText).toBe(PREEMPTIVE_TOOL_RESULT_COMPACTION_PLACEHOLDER);
+  });
 });

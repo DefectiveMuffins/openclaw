@@ -6,6 +6,7 @@ import type {
   ChannelsStatusSnapshot,
   CronJob,
   CronStatus,
+  GatewayModelChoice,
   SkillStatusReport,
   ToolsCatalogResult,
 } from "../types.ts";
@@ -24,6 +25,7 @@ import {
   parseFallbackList,
   resolveAgentConfig,
   resolveAgentEmoji,
+  resolveAgentOptimizationSummary,
   resolveEffectiveModelFallbacks,
   resolveModelLabel,
   resolveModelPrimary,
@@ -38,6 +40,7 @@ export type AgentsProps = {
   selectedAgentId: string | null;
   activePanel: AgentsPanel;
   configForm: Record<string, unknown> | null;
+  modelChoices: GatewayModelChoice[];
   configLoading: boolean;
   configSaving: boolean;
   configDirty: boolean;
@@ -116,7 +119,7 @@ export function renderAgents(props: AgentsProps) {
             <div class="card-sub">${agents.length} configured.</div>
           </div>
           <button class="btn btn--sm" ?disabled=${props.loading} @click=${props.onRefresh}>
-            ${props.loading ? "Loading…" : "Refresh"}
+            ${props.loading ? "Loading..." : "Refresh"}
           </button>
         </div>
         ${
@@ -173,6 +176,7 @@ export function renderAgents(props: AgentsProps) {
                         agent: selectedAgent,
                         defaultId,
                         configForm: props.configForm,
+                        modelChoices: props.modelChoices,
                         agentFilesList: props.agentFilesList,
                         agentIdentity: props.agentIdentityById[selectedAgent.id] ?? null,
                         agentIdentityError: props.agentIdentityError,
@@ -348,6 +352,7 @@ function renderAgentOverview(params: {
   agent: AgentsListResult["agents"][number];
   defaultId: string | null;
   configForm: Record<string, unknown> | null;
+  modelChoices: GatewayModelChoice[];
   agentFilesList: AgentsFilesListResult | null;
   agentIdentity: AgentIdentityResult | null;
   agentIdentityLoading: boolean;
@@ -362,7 +367,9 @@ function renderAgentOverview(params: {
 }) {
   const {
     agent,
+    defaultId,
     configForm,
+    modelChoices,
     agentFilesList,
     agentIdentity,
     agentIdentityLoading,
@@ -406,16 +413,17 @@ function renderAgentOverview(params: {
   const skillFilter = Array.isArray(config.entry?.skills) ? config.entry?.skills : null;
   const skillCount = skillFilter?.length ?? null;
   const identityStatus = agentIdentityLoading
-    ? "Loading…"
+    ? "Loading..."
     : agentIdentityError
       ? "Unavailable"
       : "";
-  const isDefault = Boolean(params.defaultId && agent.id === params.defaultId);
+  const isDefault = Boolean(defaultId && agent.id === defaultId);
+  const optimization = resolveAgentOptimizationSummary(configForm, agent.id);
 
   return html`
     <section class="card">
       <div class="card-title">Overview</div>
-      <div class="card-sub">Workspace paths and identity metadata.</div>
+      <div class="card-sub">Workspace paths, identity metadata, and agentic tuning.</div>
       <div class="agents-overview-grid" style="margin-top: 16px;">
         <div class="agent-kv">
           <div class="label">Workspace</div>
@@ -464,7 +472,7 @@ function renderAgentOverview(params: {
                       </option>
                     `
               }
-              ${buildModelOptions(configForm, effectivePrimary ?? undefined)}
+              ${buildModelOptions(configForm, effectivePrimary ?? undefined, modelChoices)}
             </select>
           </label>
           <label class="field" style="min-width: 260px; flex: 1;">
@@ -490,10 +498,137 @@ function renderAgentOverview(params: {
             ?disabled=${configSaving || !configDirty}
             @click=${onConfigSave}
           >
-            ${configSaving ? "Saving…" : "Save"}
+            ${configSaving ? "Saving..." : "Save"}
           </button>
+        </div>
+      </div>
+
+      <div style="margin-top: 24px;">
+        <div class="label">RAG and Delegation</div>
+        <div class="card-sub" style="margin-top: 4px;">
+          Effective staged retrieval, cheap-model routing, and subagent orchestration defaults.
+        </div>
+        <div class="agents-overview-grid" style="margin-top: 16px;">
+          <div class="agent-kv">
+            <div class="label">Memory Search</div>
+            <div>
+              ${optimization.memorySearch.enabled ? "on" : "off"}
+              ${optimization.memorySearch.provider
+                ? html`<span class="mono"> | ${optimization.memorySearch.provider}</span>`
+                : nothing}
+            </div>
+            <div class="agent-kv-sub muted">
+              ${optimization.memorySearch.routingEnabled
+                ? `routing | ${optimization.memorySearch.maxQueries ?? 3} queries`
+                : "single-query"}
+            </div>
+          </div>
+          <div class="agent-kv">
+            <div class="label">Working Set</div>
+            <div>${optimization.memorySearch.workingSetEnabled ? "enabled" : "disabled"}</div>
+            <div class="agent-kv-sub muted">${formatWorkingSetSummary(optimization)}</div>
+          </div>
+          <div class="agent-kv">
+            <div class="label">Cheap-Stage Routing</div>
+            <div>${optimization.modelRouting.enabled ? "enabled" : "disabled"}</div>
+            <div class="agent-kv-sub muted">${formatModelRoutingSummary(optimization)}</div>
+          </div>
+          <div class="agent-kv">
+            <div class="label">Escalation</div>
+            <div>${formatEscalationSummary(optimization)}</div>
+            <div class="agent-kv-sub muted">
+              verification
+              ${optimization.modelRouting.verificationModel
+                ? html` <span class="mono">${optimization.modelRouting.verificationModel}</span>`
+                : " inherits primary model"}
+            </div>
+          </div>
+          <div class="agent-kv">
+            <div class="label">Thinking and Skills</div>
+            <div>${optimization.thinkingDefault}</div>
+            <div class="agent-kv-sub muted">skills ${optimization.skillsPromptMode}</div>
+          </div>
+          <div class="agent-kv">
+            <div class="label">Subagent Defaults</div>
+            <div>${optimization.subagents.delegationEnabled ? "structured delegation" : "freeform delegation"}</div>
+            <div class="agent-kv-sub muted">${formatSubagentSummary(optimization)}</div>
+          </div>
         </div>
       </div>
     </section>
   `;
 }
+
+function formatDurationMs(ms?: number): string {
+  if (!(typeof ms === "number") || !Number.isFinite(ms) || ms <= 0) {
+    return "default";
+  }
+  if (ms >= 3_600_000) {
+    return `${Math.round(ms / 3_600_000)}h`;
+  }
+  if (ms >= 60_000) {
+    return `${Math.round(ms / 60_000)}m`;
+  }
+  if (ms >= 1_000) {
+    return `${Math.round(ms / 1_000)}s`;
+  }
+  return `${Math.round(ms)}ms`;
+}
+
+function formatWorkingSetSummary(
+  optimization: import("./agents-utils.ts").AgentOptimizationSummary,
+): string {
+  const sources =
+    optimization.memorySearch.workingSetSources.length > 0
+      ? optimization.memorySearch.workingSetSources.join(", ")
+      : "toolResults, subagentReports";
+  return `${sources} | TTL ${formatDurationMs(optimization.memorySearch.workingSetTtlMs)}`;
+}
+
+function formatModelRoutingSummary(
+  optimization: import("./agents-utils.ts").AgentOptimizationSummary,
+): string {
+  const parts = [
+    optimization.modelRouting.plannerModel
+      ? `planner ${optimization.modelRouting.plannerModel}`
+      : null,
+    optimization.modelRouting.retrievalModel
+      ? `retrieve ${optimization.modelRouting.retrievalModel}`
+      : null,
+    optimization.modelRouting.compressionModel
+      ? `compress ${optimization.modelRouting.compressionModel}`
+      : null,
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(" | ") : "uses primary model";
+}
+
+function formatEscalationSummary(
+  optimization: import("./agents-utils.ts").AgentOptimizationSummary,
+): string {
+  const confidence = optimization.modelRouting.minConfidence;
+  const cheapPasses = optimization.modelRouting.maxCheapPasses;
+  const confidenceLabel =
+    typeof confidence === "number" && Number.isFinite(confidence)
+      ? `confidence >= ${Math.round(confidence * 100)}%`
+      : "confidence default";
+  const passesLabel =
+    typeof cheapPasses === "number" && Number.isFinite(cheapPasses)
+      ? `${cheapPasses} cheap passes`
+      : "default passes";
+  return `${confidenceLabel} | ${passesLabel}`;
+}
+
+function formatSubagentSummary(
+  optimization: import("./agents-utils.ts").AgentOptimizationSummary,
+): string {
+  const parts = [
+    optimization.subagents.autoTier ? "auto-tier on" : "auto-tier off",
+    optimization.subagents.simpleTaskModel ? optimization.subagents.simpleTaskModel : null,
+    optimization.subagents.parallelResearchEnabled
+      ? `research fan-out ${optimization.subagents.parallelResearchMaxConcurrent ?? 3}`
+      : "serial research",
+    optimization.subagents.structuredResults ? "structured results" : null,
+  ].filter(Boolean);
+  return parts.join(" | ");
+}
+

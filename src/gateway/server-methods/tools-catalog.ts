@@ -19,6 +19,8 @@ import {
 } from "../protocol/index.js";
 import type { GatewayRequestHandlers, RespondFn } from "./types.js";
 
+type ToolCatalogProfile = (typeof PROFILE_OPTIONS)[number]["id"];
+
 type ToolCatalogEntry = {
   id: string;
   label: string;
@@ -26,7 +28,7 @@ type ToolCatalogEntry = {
   source: "core" | "plugin";
   pluginId?: string;
   optional?: boolean;
-  defaultProfiles: Array<"minimal" | "coding" | "messaging" | "full">;
+  defaultProfiles: ToolCatalogProfile[];
 };
 
 type ToolCatalogGroup = {
@@ -164,3 +166,5 @@ export const toolsCatalogHandlers: GatewayRequestHandlers = {
     );
   },
 };
+
+

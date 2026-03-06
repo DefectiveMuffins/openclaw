@@ -68,6 +68,8 @@ export type MemoryFlushSettings = {
   prompt: string;
   systemPrompt: string;
   reserveTokensFloor: number;
+  periodicTurnInterval: number;
+  periodicMinutes: number;
 };
 
 const normalizeNonNegativeInt = (value: unknown): number | null => {
@@ -94,6 +96,8 @@ export function resolveMemoryFlushSettings(cfg?: OpenClawConfig): MemoryFlushSet
   const reserveTokensFloor =
     normalizeNonNegativeInt(cfg?.agents?.defaults?.compaction?.reserveTokensFloor) ??
     DEFAULT_PI_COMPACTION_RESERVE_TOKENS_FLOOR;
+  const periodicTurnInterval = normalizeNonNegativeInt(defaults?.periodicTurnInterval) ?? 0;
+  const periodicMinutes = normalizeNonNegativeInt(defaults?.periodicMinutes) ?? 0;
 
   return {
     enabled,
@@ -102,6 +106,8 @@ export function resolveMemoryFlushSettings(cfg?: OpenClawConfig): MemoryFlushSet
     prompt: ensureNoReplyHint(prompt),
     systemPrompt: ensureNoReplyHint(systemPrompt),
     reserveTokensFloor,
+    periodicTurnInterval,
+    periodicMinutes,
   };
 }
 
@@ -124,7 +130,12 @@ export function resolveMemoryFlushContextWindowTokens(params: {
 export function shouldRunMemoryFlush(params: {
   entry?: Pick<
     SessionEntry,
-    "totalTokens" | "totalTokensFresh" | "compactionCount" | "memoryFlushCompactionCount"
+    | "totalTokens"
+    | "totalTokensFresh"
+    | "compactionCount"
+    | "memoryFlushCompactionCount"
+    | "memoryFlushAt"
+    | "memoryFlushTurnCount"
   >;
   /**
    * Optional token count override for flush gating. When provided, this value is
@@ -135,6 +146,9 @@ export function shouldRunMemoryFlush(params: {
   contextWindowTokens: number;
   reserveTokensFloor: number;
   softThresholdTokens: number;
+  periodicTurnInterval?: number;
+  periodicMinutes?: number;
+  nowMs?: number;
 }): boolean {
   if (!params.entry) {
     return false;
@@ -154,18 +168,29 @@ export function shouldRunMemoryFlush(params: {
   const reserveTokens = Math.max(0, Math.floor(params.reserveTokensFloor));
   const softThreshold = Math.max(0, Math.floor(params.softThresholdTokens));
   const threshold = Math.max(0, contextWindow - reserveTokens - softThreshold);
-  if (threshold <= 0) {
-    return false;
-  }
-  if (totalTokens < threshold) {
-    return false;
+  const periodicTurnInterval = Math.max(0, Math.floor(params.periodicTurnInterval ?? 0));
+  const periodicMinutes = Math.max(0, Math.floor(params.periodicMinutes ?? 0));
+  const nowMs =
+    typeof params.nowMs === "number" && Number.isFinite(params.nowMs) ? params.nowMs : Date.now();
+  const turnsSinceLastFlush = Math.max(0, Math.floor(params.entry.memoryFlushTurnCount ?? 0));
+  const periodicTurnTrigger =
+    periodicTurnInterval > 0 && turnsSinceLastFlush > periodicTurnInterval;
+
+  const periodicMs = periodicMinutes * 60 * 1000;
+  const memoryFlushAt = params.entry.memoryFlushAt;
+  const periodicTimeTrigger =
+    periodicMs > 0 &&
+    typeof memoryFlushAt === "number" &&
+    Number.isFinite(memoryFlushAt) &&
+    nowMs - memoryFlushAt > periodicMs;
+
+  let nearCompactionTrigger = false;
+  if (threshold > 0 && totalTokens >= threshold) {
+    const compactionCount = params.entry.compactionCount ?? 0;
+    const lastFlushAt = params.entry.memoryFlushCompactionCount;
+    nearCompactionTrigger =
+      !(typeof lastFlushAt === "number" && lastFlushAt === compactionCount);
   }
 
-  const compactionCount = params.entry.compactionCount ?? 0;
-  const lastFlushAt = params.entry.memoryFlushCompactionCount;
-  if (typeof lastFlushAt === "number" && lastFlushAt === compactionCount) {
-    return false;
-  }
-
-  return true;
+  return nearCompactionTrigger || periodicTurnTrigger || periodicTimeTrigger;
 }

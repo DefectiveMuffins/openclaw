@@ -29,4 +29,35 @@ describe("resolveSkillsPromptForRun", () => {
     expect(prompt).toContain("<available_skills>");
     expect(prompt).toContain("/app/skills/demo-skill/SKILL.md");
   });
+
+  it("uses compact snapshot prompt when promptMode=compact", () => {
+    const prompt = resolveSkillsPromptForRun({
+      skillsSnapshot: { prompt: "FULL", compactPrompt: "COMPACT", skills: [] },
+      config: { agents: { defaults: { skills: { promptMode: "compact" } } } },
+      workspaceDir: "/tmp/openclaw",
+    });
+    expect(prompt).toBe("COMPACT");
+  });
+
+  it("builds compact prompt from entries when promptMode=compact", () => {
+    const entry: SkillEntry = {
+      skill: {
+        name: "demo-skill",
+        description: "Demo summary with details",
+        filePath: "/app/skills/demo-skill/SKILL.md",
+        baseDir: "/app/skills/demo-skill",
+        source: "openclaw-bundled",
+        disableModelInvocation: false,
+      },
+      frontmatter: {},
+    };
+    const prompt = resolveSkillsPromptForRun({
+      entries: [entry],
+      config: { agents: { defaults: { skills: { promptMode: "compact" } } } },
+      workspaceDir: "/tmp/openclaw",
+    });
+    expect(prompt).toContain("<available_skills>");
+    expect(prompt).toContain("<skill name=\"demo-skill\"");
+    expect(prompt).toContain("location=\"/app/skills/demo-skill/SKILL.md\"");
+  });
 });

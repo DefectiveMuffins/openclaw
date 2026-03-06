@@ -382,6 +382,13 @@ describe("compaction-safeguard runtime registry", () => {
       model,
     });
   });
+
+  it("stores pruning strategy in runtime", () => {
+    const sm = {};
+    setCompactionSafeguardRuntime(sm, { pruningStrategy: "relevance" });
+    const retrieved = getCompactionSafeguardRuntime(sm);
+    expect(retrieved?.pruningStrategy).toBe("relevance");
+  });
 });
 
 describe("compaction-safeguard extension model fallback", () => {

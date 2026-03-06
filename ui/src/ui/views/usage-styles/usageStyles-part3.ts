@@ -290,6 +290,12 @@ export const usageStylesPart3 = `
     flex: 1 1 auto;
     max-height: none;
   }
+  .session-detail-sidepanels {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+  }
   .context-details-panel {
     display: flex;
     flex-direction: column;
@@ -476,6 +482,9 @@ export const usageStylesPart3 = `
       grid-template-columns: 1fr;
     }
     .session-detail-row {
+      grid-template-columns: 1fr;
+    }
+    .session-detail-bottom {
       grid-template-columns: 1fr;
     }
   }

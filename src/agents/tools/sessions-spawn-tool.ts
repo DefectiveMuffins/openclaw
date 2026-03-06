@@ -2,6 +2,10 @@ import { Type } from "@sinclair/typebox";
 import type { GatewayMessageChannel } from "../../utils/message-channel.js";
 import { ACP_SPAWN_MODES, spawnAcpDirect } from "../acp-spawn.js";
 import { optionalStringEnum } from "../schema/typebox.js";
+import {
+  SUBAGENT_DELEGATION_ROLES,
+  SUBAGENT_RESPONSE_FORMATS,
+} from "../subagent-result-contract.js";
 import { SUBAGENT_SPAWN_MODES, spawnSubagentDirect } from "../subagent-spawn.js";
 import type { AnyAgentTool } from "./common.js";
 import { jsonResult, readStringParam, ToolInputError } from "./common.js";
@@ -34,6 +38,10 @@ const SessionsSpawnToolSchema = Type.Object({
   mode: optionalStringEnum(SUBAGENT_SPAWN_MODES),
   cleanup: optionalStringEnum(["delete", "keep"] as const),
   sandbox: optionalStringEnum(SESSIONS_SPAWN_SANDBOX_MODES),
+  role: optionalStringEnum(SUBAGENT_DELEGATION_ROLES),
+  deliverable: Type.Optional(Type.String()),
+  acceptance: Type.Optional(Type.Array(Type.String(), { maxItems: 20 })),
+  responseFormat: optionalStringEnum(SUBAGENT_RESPONSE_FORMATS),
 
   // Inline attachments (snapshot-by-value).
   // NOTE: Attachment contents are redacted from transcript persistence by sanitizeToolCallInputs.
@@ -97,6 +105,23 @@ export function createSessionsSpawnTool(opts?: {
       const cleanup =
         params.cleanup === "keep" || params.cleanup === "delete" ? params.cleanup : "keep";
       const sandbox = params.sandbox === "require" ? "require" : "inherit";
+      const role = readStringParam(params, "role") as
+        | "research"
+        | "edit"
+        | "verify"
+        | "summarize"
+        | undefined;
+      const deliverable = readStringParam(params, "deliverable");
+      const acceptance = Array.isArray(params.acceptance)
+        ? params.acceptance
+            .filter((entry): entry is string => typeof entry === "string")
+            .map((entry) => entry.trim())
+            .filter((entry) => entry.length > 0)
+        : undefined;
+      const responseFormat = readStringParam(params, "responseFormat") as
+        | "text"
+        | "structured"
+        | undefined;
       // Back-compat: older callers used timeoutSeconds for this tool.
       const timeoutSecondsCandidate =
         typeof params.runTimeoutSeconds === "number"
@@ -158,6 +183,10 @@ export function createSessionsSpawnTool(opts?: {
           mode,
           cleanup,
           sandbox,
+          role,
+          deliverable,
+          acceptance,
+          responseFormat,
           expectsCompletionMessage: true,
           attachments,
           attachMountPath:

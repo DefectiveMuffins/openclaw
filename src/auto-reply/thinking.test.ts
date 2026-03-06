@@ -4,6 +4,7 @@ import {
   listThinkingLevels,
   normalizeReasoningLevel,
   normalizeThinkLevel,
+  resolveAdaptiveThinkLevel,
 } from "./thinking.js";
 
 describe("normalizeThinkLevel", () => {
@@ -94,3 +95,26 @@ describe("normalizeReasoningLevel", () => {
     expect(normalizeReasoningLevel("streaming")).toBe("stream");
   });
 });
+
+describe("resolveAdaptiveThinkLevel", () => {
+  it("returns off for simple greetings", () => {
+    expect(resolveAdaptiveThinkLevel("hi")).toBe("off");
+  });
+
+  it("returns minimal for short status queries", () => {
+    expect(resolveAdaptiveThinkLevel("status?")).toBe("minimal");
+  });
+
+  it("returns low for simple edit requests", () => {
+    expect(resolveAdaptiveThinkLevel("please update config", [])).toBe("low");
+  });
+
+  it("returns medium for code-heavy requests", () => {
+    expect(resolveAdaptiveThinkLevel("fix src/app.ts and src/lib.ts", [])).toBe("medium");
+  });
+
+  it("returns high for architecture/debug-race prompts", () => {
+    expect(resolveAdaptiveThinkLevel("debug race condition in scheduler", [])).toBe("high");
+  });
+});
+

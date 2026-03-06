@@ -7,9 +7,11 @@ import {
 import {
   type SessionSystemPromptReport,
   type SessionEntry,
+  type SessionAgentRoutingSummary,
   updateSessionStoreEntry,
 } from "../../config/sessions.js";
 import { logVerbose } from "../../globals.js";
+import { applyRoutingSummaryToAgenticCounters } from "../../agents/agentic-counters.js";
 
 function applyCliSessionIdToSessionPatch(
   params: {
@@ -48,6 +50,7 @@ export async function persistSessionUsageUpdate(params: {
   contextTokensUsed?: number;
   promptTokens?: number;
   systemPromptReport?: SessionSystemPromptReport;
+  routing?: SessionAgentRoutingSummary | null;
   cliSessionId?: string;
   logLabel?: string;
 }): Promise<void> {
@@ -88,6 +91,16 @@ export async function persistSessionUsageUpdate(params: {
             model: params.modelUsed ?? entry.model,
             contextTokens: resolvedContextTokens,
             systemPromptReport: params.systemPromptReport ?? entry.systemPromptReport,
+            lastAgentRouting:
+              params.routing === undefined
+                ? entry.lastAgentRouting
+                : params.routing
+                  ? { ...params.routing, updatedAt: Date.now() }
+                  : undefined,
+            agenticCounters: applyRoutingSummaryToAgenticCounters(
+              entry.agenticCounters,
+              params.routing,
+            ),
             updatedAt: Date.now(),
           };
           if (hasUsage) {
@@ -123,6 +136,16 @@ export async function persistSessionUsageUpdate(params: {
             model: params.modelUsed ?? entry.model,
             contextTokens: params.contextTokensUsed ?? entry.contextTokens,
             systemPromptReport: params.systemPromptReport ?? entry.systemPromptReport,
+            lastAgentRouting:
+              params.routing === undefined
+                ? entry.lastAgentRouting
+                : params.routing
+                  ? { ...params.routing, updatedAt: Date.now() }
+                  : undefined,
+            agenticCounters: applyRoutingSummaryToAgenticCounters(
+              entry.agenticCounters,
+              params.routing,
+            ),
             updatedAt: Date.now(),
           };
           return applyCliSessionIdToSessionPatch(params, entry, patch);
