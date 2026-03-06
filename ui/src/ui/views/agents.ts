@@ -41,6 +41,9 @@ export type AgentsProps = {
   activePanel: AgentsPanel;
   configForm: Record<string, unknown> | null;
   modelChoices: GatewayModelChoice[];
+  modelDiscoveryLoading: boolean;
+  modelDiscoveryError: string | null;
+  modelDiscoveryImportedCount: number | null;
   configLoading: boolean;
   configSaving: boolean;
   configDirty: boolean;
@@ -82,6 +85,7 @@ export type AgentsProps = {
   onToolsOverridesChange: (agentId: string, alsoAllow: string[], deny: string[]) => void;
   onConfigReload: () => void;
   onConfigSave: () => void;
+  onDiscoverLmStudioModels: () => void;
   onModelChange: (agentId: string, modelId: string | null) => void;
   onModelFallbacksChange: (agentId: string, fallbacks: string[]) => void;
   onChannelsRefresh: () => void;
@@ -177,6 +181,9 @@ export function renderAgents(props: AgentsProps) {
                         defaultId,
                         configForm: props.configForm,
                         modelChoices: props.modelChoices,
+                        modelDiscoveryLoading: props.modelDiscoveryLoading,
+                        modelDiscoveryError: props.modelDiscoveryError,
+                        modelDiscoveryImportedCount: props.modelDiscoveryImportedCount,
                         agentFilesList: props.agentFilesList,
                         agentIdentity: props.agentIdentityById[selectedAgent.id] ?? null,
                         agentIdentityError: props.agentIdentityError,
@@ -186,6 +193,7 @@ export function renderAgents(props: AgentsProps) {
                         configDirty: props.configDirty,
                         onConfigReload: props.onConfigReload,
                         onConfigSave: props.onConfigSave,
+                        onDiscoverLmStudioModels: props.onDiscoverLmStudioModels,
                         onModelChange: props.onModelChange,
                         onModelFallbacksChange: props.onModelFallbacksChange,
                       })
@@ -353,6 +361,9 @@ function renderAgentOverview(params: {
   defaultId: string | null;
   configForm: Record<string, unknown> | null;
   modelChoices: GatewayModelChoice[];
+  modelDiscoveryLoading: boolean;
+  modelDiscoveryError: string | null;
+  modelDiscoveryImportedCount: number | null;
   agentFilesList: AgentsFilesListResult | null;
   agentIdentity: AgentIdentityResult | null;
   agentIdentityLoading: boolean;
@@ -362,6 +373,7 @@ function renderAgentOverview(params: {
   configDirty: boolean;
   onConfigReload: () => void;
   onConfigSave: () => void;
+  onDiscoverLmStudioModels: () => void;
   onModelChange: (agentId: string, modelId: string | null) => void;
   onModelFallbacksChange: (agentId: string, fallbacks: string[]) => void;
 }) {
@@ -370,6 +382,9 @@ function renderAgentOverview(params: {
     defaultId,
     configForm,
     modelChoices,
+    modelDiscoveryLoading,
+    modelDiscoveryError,
+    modelDiscoveryImportedCount,
     agentFilesList,
     agentIdentity,
     agentIdentityLoading,
@@ -379,6 +394,7 @@ function renderAgentOverview(params: {
     configDirty,
     onConfigReload,
     onConfigSave,
+    onDiscoverLmStudioModels,
     onModelChange,
     onModelFallbacksChange,
   } = params;
@@ -489,17 +505,38 @@ function renderAgentOverview(params: {
             />
           </label>
         </div>
-        <div class="row" style="justify-content: flex-end; gap: 8px;">
-          <button class="btn btn--sm" ?disabled=${configLoading} @click=${onConfigReload}>
-            Reload Config
-          </button>
-          <button
-            class="btn btn--sm primary"
-            ?disabled=${configSaving || !configDirty}
-            @click=${onConfigSave}
-          >
-            ${configSaving ? "Saving..." : "Save"}
-          </button>
+        <div class="row" style="justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 12px;">
+          <div>
+            ${
+              typeof modelDiscoveryImportedCount === "number"
+                ? html`<div class="muted">Imported ${modelDiscoveryImportedCount} LM Studio models into the config draft. Save to persist.</div>`
+                : nothing
+            }
+            ${
+              modelDiscoveryError
+                ? html`<div class="callout danger" style="margin-top: 8px;">${modelDiscoveryError}</div>`
+                : nothing
+            }
+          </div>
+          <div class="row" style="justify-content: flex-end; gap: 8px;">
+            <button
+              class="btn btn--sm"
+              ?disabled=${!configForm || configLoading || configSaving || modelDiscoveryLoading}
+              @click=${onDiscoverLmStudioModels}
+            >
+              ${modelDiscoveryLoading ? "Syncing..." : "Sync LM Studio"}
+            </button>
+            <button class="btn btn--sm" ?disabled=${configLoading} @click=${onConfigReload}>
+              Reload Config
+            </button>
+            <button
+              class="btn btn--sm primary"
+              ?disabled=${configSaving || !configDirty}
+              @click=${onConfigSave}
+            >
+              ${configSaving ? "Saving..." : "Save"}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -513,14 +550,18 @@ function renderAgentOverview(params: {
             <div class="label">Memory Search</div>
             <div>
               ${optimization.memorySearch.enabled ? "on" : "off"}
-              ${optimization.memorySearch.provider
-                ? html`<span class="mono"> | ${optimization.memorySearch.provider}</span>`
-                : nothing}
+              ${
+                optimization.memorySearch.provider
+                  ? html`<span class="mono"> | ${optimization.memorySearch.provider}</span>`
+                  : nothing
+              }
             </div>
             <div class="agent-kv-sub muted">
-              ${optimization.memorySearch.routingEnabled
-                ? `routing | ${optimization.memorySearch.maxQueries ?? 3} queries`
-                : "single-query"}
+              ${
+                optimization.memorySearch.routingEnabled
+                  ? `routing | ${optimization.memorySearch.maxQueries ?? 3} queries`
+                  : "single-query"
+              }
             </div>
           </div>
           <div class="agent-kv">
@@ -538,9 +579,11 @@ function renderAgentOverview(params: {
             <div>${formatEscalationSummary(optimization)}</div>
             <div class="agent-kv-sub muted">
               verification
-              ${optimization.modelRouting.verificationModel
-                ? html` <span class="mono">${optimization.modelRouting.verificationModel}</span>`
-                : " inherits primary model"}
+              ${
+                optimization.modelRouting.verificationModel
+                  ? html` <span class="mono">${optimization.modelRouting.verificationModel}</span>`
+                  : " inherits primary model"
+              }
             </div>
           </div>
           <div class="agent-kv">
@@ -631,4 +674,3 @@ function formatSubagentSummary(
   ].filter(Boolean);
   return parts.join(" | ");
 }
-

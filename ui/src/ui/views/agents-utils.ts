@@ -366,7 +366,9 @@ function normalizeStringList(values: unknown): string[] {
   if (!Array.isArray(values)) {
     return [];
   }
-  return values.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  return values.filter(
+    (value): value is string => typeof value === "string" && value.trim().length > 0,
+  );
 }
 
 export function resolveAgentOptimizationSummary(
@@ -398,7 +400,11 @@ export function resolveAgentOptimizationSummary(
       enabled: Boolean(pickDefined(entryMemory?.enabled, defaultMemory?.enabled, false)),
       provider: pickDefined(entryMemory?.provider, defaultMemory?.provider),
       routingEnabled: Boolean(
-        pickDefined(entryMemory?.query?.routing?.enabled, defaultMemory?.query?.routing?.enabled, false),
+        pickDefined(
+          entryMemory?.query?.routing?.enabled,
+          defaultMemory?.query?.routing?.enabled,
+          false,
+        ),
       ),
       maxQueries: pickDefined(
         entryMemory?.query?.routing?.maxQueries,
@@ -412,7 +418,10 @@ export function resolveAgentOptimizationSummary(
         pickDefined(entryMemory?.workingSet?.enabled, defaultMemory?.workingSet?.enabled, false),
       ),
       workingSetSources,
-      workingSetTtlMs: pickDefined(entryMemory?.workingSet?.ttlMs, defaultMemory?.workingSet?.ttlMs),
+      workingSetTtlMs: pickDefined(
+        entryMemory?.workingSet?.ttlMs,
+        defaultMemory?.workingSet?.ttlMs,
+      ),
       workingSetMaxEntries: pickDefined(
         entryMemory?.workingSet?.maxEntries,
         defaultMemory?.workingSet?.maxEntries,
@@ -562,7 +571,7 @@ type ConfiguredModelOption = {
   label: string;
 };
 
-function resolveConfiguredModels(
+function resolveConfiguredAliasModels(
   configForm: Record<string, unknown> | null,
 ): ConfiguredModelOption[] {
   const cfg = configForm as ConfigSnapshot | null;
@@ -586,6 +595,63 @@ function resolveConfiguredModels(
     options.push({ value: trimmed, label });
   }
   return options;
+}
+
+function resolveProviderConfiguredModels(
+  configForm: Record<string, unknown> | null,
+): ConfiguredModelOption[] {
+  if (!configForm || typeof configForm !== "object") {
+    return [];
+  }
+  const models = (configForm as { models?: unknown }).models;
+  if (!models || typeof models !== "object" || Array.isArray(models)) {
+    return [];
+  }
+  const providers = (models as { providers?: unknown }).providers;
+  if (!providers || typeof providers !== "object" || Array.isArray(providers)) {
+    return [];
+  }
+  const options: ConfiguredModelOption[] = [];
+  for (const [providerId, providerRaw] of Object.entries(providers)) {
+    if (!providerRaw || typeof providerRaw !== "object" || Array.isArray(providerRaw)) {
+      continue;
+    }
+    const configuredModels = (providerRaw as { models?: unknown }).models;
+    if (!Array.isArray(configuredModels)) {
+      continue;
+    }
+    for (const entry of configuredModels) {
+      if (!entry || typeof entry !== "object") {
+        continue;
+      }
+      const id =
+        typeof (entry as { id?: unknown }).id === "string"
+          ? (entry as { id: string }).id.trim()
+          : "";
+      if (!id) {
+        continue;
+      }
+      const value = `${providerId}/${id}`;
+      const name =
+        typeof (entry as { name?: unknown }).name === "string"
+          ? (entry as { name: string }).name.trim()
+          : "";
+      options.push({
+        value,
+        label: name && name !== id ? `${name} (${value})` : value,
+      });
+    }
+  }
+  return options;
+}
+
+function resolveConfiguredModels(
+  configForm: Record<string, unknown> | null,
+): ConfiguredModelOption[] {
+  return [
+    ...resolveConfiguredAliasModels(configForm),
+    ...resolveProviderConfiguredModels(configForm),
+  ];
 }
 
 function buildCatalogModelOptions(modelChoices: GatewayModelChoice[]): ConfiguredModelOption[] {
@@ -713,4 +779,3 @@ export function matchesList(name: string, list?: string[]) {
 export function resolveToolProfile(profile: string) {
   return resolveToolProfilePolicy(profile) ?? undefined;
 }
-

@@ -17,11 +17,7 @@ function collectTemplateMarkup(value: unknown): string {
   if (Array.isArray(value)) {
     return value.map((entry) => collectTemplateMarkup(entry)).join("");
   }
-  if (
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "bigint"
-  ) {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "bigint") {
     return String(value);
   }
   if (typeof value !== "object") {
@@ -231,9 +227,10 @@ function createAgentsProps(overrides: Partial<AgentsProps> = {}): AgentsProps {
     },
     selectedAgentId: "writer",
     activePanel: "overview",
-    modelChoices: [
-      { id: "qwen2.5-coder", name: "Qwen 2.5 Coder", provider: "lmstudio" },
-    ],
+    modelChoices: [{ id: "qwen2.5-coder", name: "Qwen 2.5 Coder", provider: "lmstudio" }],
+    modelDiscoveryLoading: false,
+    modelDiscoveryError: null,
+    modelDiscoveryImportedCount: null,
     configForm: {
       agents: {
         defaults: {
@@ -334,6 +331,7 @@ function createAgentsProps(overrides: Partial<AgentsProps> = {}): AgentsProps {
     onToolsOverridesChange: () => undefined,
     onConfigReload: () => undefined,
     onConfigSave: () => undefined,
+    onDiscoverLmStudioModels: () => undefined,
     onModelChange: () => undefined,
     onModelFallbacksChange: () => undefined,
     onChannelsRefresh: () => undefined,
@@ -368,6 +366,26 @@ describe("buildModelOptions", () => {
     expect(text).toContain("Primary (openai/gpt-5.2)");
     expect(text).toContain("Qwen 2.5 Coder (lmstudio/qwen2.5-coder)");
   });
+
+  it("includes provider-configured models after an LM Studio sync is saved", async () => {
+    const { buildModelOptions } = await loadAgentsUtils();
+    const template = buildModelOptions(
+      {
+        models: {
+          providers: {
+            lmstudio: {
+              models: [{ id: "deepseek-r1", name: "DeepSeek R1" }],
+            },
+          },
+        },
+      },
+      null,
+      [],
+    );
+    const text = renderTemplateText(template);
+
+    expect(text).toContain("DeepSeek R1 (lmstudio/deepseek-r1)");
+  });
 });
 describe("renderAgents overview", () => {
   it("renders the staged RAG and delegation summary cards", async () => {
@@ -385,5 +403,11 @@ describe("renderAgents overview", () => {
     expect(text).toContain("skills compact");
     expect(text).toContain("research fan-out 3");
   });
-});
 
+  it("renders the LM Studio sync action", async () => {
+    const { renderAgents } = await import("./agents.ts");
+    const text = renderTemplateText(renderAgents(createAgentsProps()));
+
+    expect(text).toContain("Sync LM Studio");
+  });
+});

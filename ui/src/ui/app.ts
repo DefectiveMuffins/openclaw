@@ -219,6 +219,9 @@ export class OpenClawApp extends LitElement {
   @state() agentsError: string | null = null;
   @state() agentsSelectedId: string | null = null;
   @state() agentModelChoices: GatewayModelChoice[] = [];
+  @state() agentModelDiscoveryLoading = false;
+  @state() agentModelDiscoveryError: string | null = null;
+  @state() agentModelDiscoveryImportedCount: number | null = null;
   @state() toolsCatalogLoading = false;
   @state() toolsCatalogError: string | null = null;
   @state() toolsCatalogResult: ToolsCatalogResult | null = null;
@@ -620,4 +623,3 @@ export class OpenClawApp extends LitElement {
     return renderApp(this as unknown as AppViewState);
   }
 }
-

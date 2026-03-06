@@ -178,6 +178,21 @@ export const ModelsListResultSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const ModelsDiscoverProviderParamsSchema = Type.Object(
+  {
+    providerId: NonEmptyString,
+  },
+  { additionalProperties: false },
+);
+
+export const ModelsDiscoverProviderResultSchema = Type.Object(
+  {
+    providerId: NonEmptyString,
+    models: Type.Array(ModelChoiceSchema),
+  },
+  { additionalProperties: false },
+);
+
 export const SkillsStatusParamsSchema = Type.Object(
   {
     agentId: Type.Optional(NonEmptyString),
@@ -273,4 +288,3 @@ export const ToolsCatalogResultSchema = Type.Object(
   },
   { additionalProperties: false },
 );
-

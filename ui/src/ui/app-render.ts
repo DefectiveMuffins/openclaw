@@ -8,7 +8,12 @@ import type { AppViewState } from "./app-view-state.ts";
 import { loadAgentFileContent, loadAgentFiles, saveAgentFile } from "./controllers/agent-files.ts";
 import { loadAgentIdentities, loadAgentIdentity } from "./controllers/agent-identity.ts";
 import { loadAgentSkills } from "./controllers/agent-skills.ts";
-import { loadAgentModelChoices, loadAgents, loadToolsCatalog } from "./controllers/agents.ts";
+import {
+  discoverProviderModels,
+  loadAgentModelChoices,
+  loadAgents,
+  loadToolsCatalog,
+} from "./controllers/agents.ts";
 import { loadChannels } from "./controllers/channels.ts";
 import { loadChatHistory } from "./controllers/chat.ts";
 import {
@@ -546,6 +551,9 @@ export function renderApp(state: AppViewState) {
                 activePanel: state.agentsPanel,
                 configForm: configValue,
                 modelChoices: state.agentModelChoices,
+                modelDiscoveryLoading: state.agentModelDiscoveryLoading,
+                modelDiscoveryError: state.agentModelDiscoveryError,
+                modelDiscoveryImportedCount: state.agentModelDiscoveryImportedCount,
                 configLoading: state.configLoading,
                 configSaving: state.configSaving,
                 configDirty: state.configFormDirty,
@@ -810,6 +818,7 @@ export function renderApp(state: AppViewState) {
                   }
                   updateConfigFormValue(state, ["agents", "list", index, "skills"], []);
                 },
+                onDiscoverLmStudioModels: () => discoverProviderModels(state, "lmstudio"),
                 onModelChange: (agentId, modelId) => {
                   if (!configValue) {
                     return;
@@ -1168,4 +1177,3 @@ export function renderApp(state: AppViewState) {
     </div>
   `;
 }
-

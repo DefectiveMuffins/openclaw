@@ -57,6 +57,7 @@ const METHOD_SCOPE_GROUPS: Record<OperatorScope, readonly string[]> = {
     "tts.status",
     "tts.providers",
     "models.list",
+    "models.discoverProvider",
     "tools.catalog",
     "agents.list",
     "agent.identity.get",

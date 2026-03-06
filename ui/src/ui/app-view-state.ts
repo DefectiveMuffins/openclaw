@@ -130,6 +130,9 @@ export type AppViewState = {
   agentsError: string | null;
   agentsSelectedId: string | null;
   agentModelChoices: GatewayModelChoice[];
+  agentModelDiscoveryLoading: boolean;
+  agentModelDiscoveryError: string | null;
+  agentModelDiscoveryImportedCount: number | null;
   toolsCatalogLoading: boolean;
   toolsCatalogError: string | null;
   toolsCatalogResult: ToolsCatalogResult | null;
@@ -321,4 +324,3 @@ export type AppViewState = {
     handleCloseSidebar: () => void;
     handleSplitRatioChange: (ratio: number) => void;
   };
-

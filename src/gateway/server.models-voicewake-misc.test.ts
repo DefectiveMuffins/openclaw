@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
@@ -428,6 +429,66 @@ describe("gateway server models + voicewake", () => {
     ]);
     expect(piSdkMock.discoverCalls).toBe(2);
   });
+  test("models.discoverProvider fetches the live LM Studio catalog", async () => {
+    const httpServer = createHttpServer((req, res) => {
+      if (req.url !== "/v1/models") {
+        res.writeHead(404).end();
+        return;
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          object: "list",
+          data: [
+            { id: "qwen2.5-coder", name: "Qwen 2.5 Coder" },
+            { id: "deepseek-r1", name: "DeepSeek R1" },
+          ],
+        }),
+      );
+    });
+    const discoveryPort = await getFreePort();
+    await new Promise<void>((resolve, reject) => {
+      httpServer.once("error", reject);
+      httpServer.listen(discoveryPort, "127.0.0.1", () => resolve());
+    });
+
+    try {
+      await withModelsConfig(
+        {
+          models: {
+            providers: {
+              lmstudio: {
+                baseUrl: `http://127.0.0.1:${discoveryPort}/v1`,
+                api: "openai-responses",
+                apiKey: "lmstudio",
+                models: [],
+              },
+            },
+          },
+        },
+        async () => {
+          const res = await rpcReq<{ providerId: string; models: ModelCatalogRpcEntry[] }>(
+            ws,
+            "models.discoverProvider",
+            { providerId: "lmstudio" },
+          );
+          expect(res.ok).toBe(true);
+          expect(res.payload).toEqual({
+            providerId: "lmstudio",
+            models: [
+              { id: "deepseek-r1", name: "DeepSeek R1", provider: "lmstudio" },
+              { id: "qwen2.5-coder", name: "Qwen 2.5 Coder", provider: "lmstudio" },
+            ],
+          });
+        },
+      );
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        httpServer.close((err) => (err ? reject(err) : resolve())),
+      );
+    }
+  });
+
   test("models.list rejects unknown params", async () => {
     piSdkMock.enabled = true;
     piSdkMock.models = [{ id: "gpt-test-a", name: "A", provider: "openai" }];
@@ -551,4 +612,3 @@ describe("gateway server misc", () => {
     );
   });
 });
-
