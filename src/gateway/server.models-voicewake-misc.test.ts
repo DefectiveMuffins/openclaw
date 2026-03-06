@@ -376,6 +376,58 @@ describe("gateway server models + voicewake", () => {
     );
   });
 
+  test("models.list refreshes full-catalog requests so newly synced models appear", async () => {
+    seedPiCatalog();
+    const first = await listModels({ includeAll: true });
+    expect(first.ok).toBe(true);
+    expect(first.payload?.models).toEqual(expectedSortedCatalog());
+    expect(piSdkMock.discoverCalls).toBe(1);
+
+    piSdkMock.models = [
+      ...buildPiCatalogFixture(),
+      {
+        id: "qwen2.5-coder",
+        name: "Qwen 2.5 Coder",
+        provider: "lmstudio",
+        contextWindow: 131_072,
+      },
+    ];
+
+    const refreshed = await listModels({ includeAll: true });
+    expect(refreshed.ok).toBe(true);
+    expect(refreshed.payload?.models).toEqual([
+      {
+        id: "claude-test-a",
+        name: "A-Model",
+        provider: "anthropic",
+        contextWindow: 200_000,
+      },
+      {
+        id: "claude-test-b",
+        name: "B-Model",
+        provider: "anthropic",
+        contextWindow: 1000,
+      },
+      {
+        id: "qwen2.5-coder",
+        name: "Qwen 2.5 Coder",
+        provider: "lmstudio",
+        contextWindow: 131_072,
+      },
+      {
+        id: "gpt-test-a",
+        name: "A-Model",
+        provider: "openai",
+        contextWindow: 8000,
+      },
+      {
+        id: "gpt-test-z",
+        name: "gpt-test-z",
+        provider: "openai",
+      },
+    ]);
+    expect(piSdkMock.discoverCalls).toBe(2);
+  });
   test("models.list rejects unknown params", async () => {
     piSdkMock.enabled = true;
     piSdkMock.models = [{ id: "gpt-test-a", name: "A", provider: "openai" }];

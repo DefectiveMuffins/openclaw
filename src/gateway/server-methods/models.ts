@@ -24,7 +24,9 @@ export const modelsHandlers: GatewayRequestHandlers = {
     }
     try {
       const includeAll = (params as { includeAll?: boolean }).includeAll === true;
-      const catalog = await context.loadGatewayModelCatalog();
+      // Full-catalog requests back the Agents model picker and should reflect
+      // fresh LM Studio / models.json changes without requiring a gateway restart.
+      const catalog = await context.loadGatewayModelCatalog({ refresh: includeAll });
       const cfg = loadConfig();
       const { allowedCatalog } = buildAllowedModelSet({
         cfg,
