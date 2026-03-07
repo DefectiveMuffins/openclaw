@@ -1656,3 +1656,33 @@
     min-width: 70px;
   }
 }
+
+.config-draft-summary {
+  margin: 18px 22px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  padding: 14px 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.config-draft-summary__title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-strong);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.config-draft-summary__text {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+@media (max-width: 1100px) {
+  .config-draft-summary {
+    margin: 16px;
+  }
+}

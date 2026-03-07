@@ -78,4 +78,26 @@ describe("sessions view", () => {
       Array.from(reasoning?.options ?? []).some((option) => option.value === "custom-mode"),
     ).toBe(true);
   });
+  it("adds an explicit open chat action for direct sessions", async () => {
+    const container = document.createElement("div");
+    render(
+      renderSessions(
+        buildProps(
+          buildResult({
+            key: "agent:main:main",
+            kind: "direct",
+            updatedAt: Date.now(),
+          }),
+        ),
+      ),
+      container,
+    );
+    await Promise.resolve();
+
+    const actionLink = Array.from(container.querySelectorAll("a")).find(
+      (link) => link.textContent?.trim() === "Open chat",
+    );
+    expect(actionLink).not.toBeUndefined();
+    expect(actionLink?.getAttribute("href")).toContain("/chat?session=agent%3Amain%3Amain");
+  });
 });

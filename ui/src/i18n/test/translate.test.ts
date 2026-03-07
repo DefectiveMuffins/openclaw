@@ -1,10 +1,20 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { i18n, t } from "../lib/translate.ts";
+
+const HEALTH_ZH_CN = "\u5065\u5eb7\u72b6\u51b5";
+
+async function waitFor(condition: () => boolean) {
+  for (let index = 0; index < 20; index += 1) {
+    if (condition()) {
+      return;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+  }
+}
 
 describe("i18n", () => {
   beforeEach(async () => {
     localStorage.clear();
-    // Reset to English
     await i18n.setLocale("en");
   });
 
@@ -21,11 +31,7 @@ describe("i18n", () => {
   });
 
   it("should fallback to English if key is missing in another locale", async () => {
-    // We haven't registered other locales in the test environment yet,
-    // but the logic should fallback to 'en' map which is always there.
     await i18n.setLocale("zh-CN");
-    // Since we don't mock the import, it might fail to load zh-CN,
-    // but let's assume it falls back to English for now.
     expect(t("common.health")).toBeDefined();
   });
 
@@ -38,19 +44,23 @@ describe("i18n", () => {
     delete internal.translations["zh-CN"];
 
     await i18n.setLocale("zh-CN");
-    expect(t("common.health")).toBe("健康状况");
+    expect(t("common.health")).toBe(HEALTH_ZH_CN);
   });
 
   it("loads saved non-English locale on startup", async () => {
     localStorage.setItem("openclaw.i18n.locale", "zh-CN");
-    vi.resetModules();
-    const fresh = await import("../lib/translate.ts");
+    const internal = i18n as unknown as {
+      locale: string;
+      translations: Record<string, unknown>;
+      loadLocale: () => void;
+    };
+    internal.locale = "en";
+    delete internal.translations["zh-CN"];
 
-    for (let index = 0; index < 5 && fresh.i18n.getLocale() !== "zh-CN"; index += 1) {
-      await Promise.resolve();
-    }
+    internal.loadLocale();
+    await waitFor(() => i18n.getLocale() === "zh-CN" && t("common.health") === HEALTH_ZH_CN);
 
-    expect(fresh.i18n.getLocale()).toBe("zh-CN");
-    expect(fresh.t("common.health")).toBe("健康状况");
+    expect(i18n.getLocale()).toBe("zh-CN");
+    expect(t("common.health")).toBe(HEALTH_ZH_CN);
   });
 });

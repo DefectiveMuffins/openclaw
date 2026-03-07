@@ -68,6 +68,7 @@ export type CronProps = {
   onEdit: (job: CronJob) => void;
   onClone: (job: CronJob) => void;
   onCancelEdit: () => void;
+  onResetDraft: () => void;
   onToggle: (job: CronJob, enabled: boolean) => void;
   onRun: (job: CronJob, mode?: "force" | "due") => void;
   onRemove: (job: CronJob) => void;
@@ -335,6 +336,76 @@ function focusFormField(id: string) {
   el.focus();
 }
 
+function summarizeDraftSchedule(form: CronFormState): string {
+  if (form.scheduleKind === "at") {
+    return form.scheduleAt.trim() ? `At ${form.scheduleAt}` : "Pick a run time.";
+  }
+  if (form.scheduleKind === "every") {
+    return form.everyAmount.trim()
+      ? `Every ${form.everyAmount.trim()} ${form.everyUnit}`
+      : "Choose an interval.";
+  }
+  return form.cronExpr.trim() ? `Cron: ${form.cronExpr.trim()}` : "Enter a cron expression.";
+}
+
+function summarizeDraftTarget(form: CronFormState): string {
+  const target = form.sessionTarget === "isolated" ? "isolated session" : "main session";
+  const agent = form.clearAgent ? "clears agent override" : form.agentId.trim() || "default agent";
+  return `${target} | ${agent}`;
+}
+
+function summarizeDraftDelivery(
+  props: CronProps,
+  deliveryMode: CronFormState["deliveryMode"],
+): string {
+  if (deliveryMode === "none") {
+    return "No delivery. Results stay internal.";
+  }
+  if (deliveryMode === "webhook") {
+    return props.form.deliveryTo.trim() || "Webhook URL not set yet.";
+  }
+  const channel = resolveChannelLabel(props, props.form.deliveryChannel || "last");
+  const recipient = props.form.deliveryTo.trim() || "last recipient";
+  return `${channel} -> ${recipient}`;
+}
+
+function summarizeDraftMessage(message: string): string {
+  const trimmed = message.trim();
+  if (!trimmed) {
+    return "No message yet.";
+  }
+  return trimmed.length > 120 ? `${trimmed.slice(0, 117)}...` : trimmed;
+}
+
+function renderDraftPreview(props: CronProps, deliveryMode: CronFormState["deliveryMode"]) {
+  return html`
+    <div class="cron-draft-preview">
+      <div class="cron-draft-preview__header">
+        <div class="cron-draft-preview__title">Draft preview</div>
+        <div class="muted">Review the run, target, and delivery before saving.</div>
+      </div>
+      <div class="cron-draft-preview__grid">
+        <div class="cron-draft-preview__item">
+          <div class="cron-draft-preview__label">Schedule</div>
+          <div class="cron-draft-preview__value">${summarizeDraftSchedule(props.form)}</div>
+        </div>
+        <div class="cron-draft-preview__item">
+          <div class="cron-draft-preview__label">Target</div>
+          <div class="cron-draft-preview__value">${summarizeDraftTarget(props.form)}</div>
+        </div>
+        <div class="cron-draft-preview__item">
+          <div class="cron-draft-preview__label">Delivery</div>
+          <div class="cron-draft-preview__value">${summarizeDraftDelivery(props, deliveryMode)}</div>
+        </div>
+        <div class="cron-draft-preview__item cron-draft-preview__item--wide">
+          <div class="cron-draft-preview__label">Payload</div>
+          <div class="cron-draft-preview__value">${summarizeDraftMessage(props.form.payloadText)}</div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderFieldLabel(text: string, required = false) {
   return html`<span>
     ${text}
@@ -360,7 +431,9 @@ export function renderCron(props: CronProps) {
     props.runsScope === "all"
       ? t("cron.jobList.allJobs")
       : (selectedJob?.name ?? props.runsJobId ?? t("cron.jobList.selectJob"));
-  const runs = props.runs;
+  const runs = props.runs.toSorted((a, b) =>
+    props.runsSortDir === "asc" ? a.ts - b.ts : b.ts - a.ts,
+  );
   const runStatusOptions = getRunStatusOptions();
   const runDeliveryOptions = getRunDeliveryOptions();
   const selectedStatusLabels = runStatusOptions
@@ -699,6 +772,7 @@ export function renderCron(props: CronProps) {
         <div class="card-sub">
           ${isEditing ? t("cron.form.updateSubtitle") : t("cron.form.createSubtitle")}
         </div>
+        ${renderDraftPreview(props, selectedDeliveryMode)}
         <div class="cron-form">
           <div class="cron-required-legend">
             <span class="cron-required-marker" aria-hidden="true">*</span> ${t("cron.form.required")}
@@ -1372,7 +1446,11 @@ export function renderCron(props: CronProps) {
                     ${t("cron.form.cancel")}
                   </button>
                 `
-              : nothing
+              : html`
+                  <button class="btn" ?disabled=${props.busy} @click=${props.onResetDraft}>
+                    Reset draft
+                  </button>
+                `
           }
         </div>
       </section>
@@ -1569,7 +1647,7 @@ function renderJob(job: CronJob, props: CronProps) {
             ?disabled=${props.busy}
             @click=${(event: Event) => {
               event.stopPropagation();
-              selectAnd(() => props.onLoadRuns(job.id));
+              props.onLoadRuns(job.id);
             }}
           >
             ${t("cron.jobList.history")}

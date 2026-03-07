@@ -34,6 +34,7 @@ describe("config view", () => {
     onSave: vi.fn(),
     onApply: vi.fn(),
     onUpdate: vi.fn(),
+    onDiscard: vi.fn(),
     onSubsectionChange: vi.fn(),
   });
 
@@ -229,5 +230,28 @@ describe("config view", () => {
     expect(option).toBeTruthy();
     option?.click();
     expect(onSearchChange).toHaveBeenCalledWith("tag:security");
+  });
+  it("renders a discard action and draft summary when there are pending changes", () => {
+    const container = document.createElement("div");
+    const onDiscard = vi.fn();
+    render(
+      renderConfig({
+        ...baseProps(),
+        onDiscard,
+        formMode: "form",
+        originalValue: { gateway: { mode: "local" }, channels: { telegram: {} } },
+        formValue: { gateway: { mode: "remote" }, channels: { telegram: {} } },
+      }),
+      container,
+    );
+
+    expect(container.textContent).toContain("Draft review");
+    expect(container.textContent).toContain("Touches Gateway.");
+    const discard = Array.from(container.querySelectorAll("button")).find(
+      (btn) => btn.textContent?.trim() === "Discard draft",
+    );
+    expect(discard).not.toBeUndefined();
+    discard?.click();
+    expect(onDiscard).toHaveBeenCalled();
   });
 });

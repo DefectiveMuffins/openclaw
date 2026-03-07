@@ -230,6 +230,7 @@ export type AppViewState = {
   | "cronBusy"
 > &
   Pick<CronModelSuggestionsState, "cronModelSuggestions"> & {
+    cronFormTouched: boolean;
     skillsLoading: boolean;
     skillsReport: SkillStatusReport | null;
     skillsError: string | null;

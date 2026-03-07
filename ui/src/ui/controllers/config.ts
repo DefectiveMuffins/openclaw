@@ -132,6 +132,35 @@ function serializeFormForSubmit(state: ConfigState): string {
   return serializeConfigForm(form);
 }
 
+function resolveDiscardFormValue(state: ConfigState): Record<string, unknown> {
+  if (state.configFormOriginal) {
+    return cloneConfigObject(state.configFormOriginal);
+  }
+  return cloneConfigObject(state.configSnapshot?.config ?? {});
+}
+
+function resolveDiscardRawValue(state: ConfigState, formValue: Record<string, unknown>): string {
+  if (state.configRawOriginal.trim()) {
+    return state.configRawOriginal;
+  }
+  return serializeConfigForm(formValue);
+}
+
+export function discardConfigDraft(state: ConfigState) {
+  const nextForm = resolveDiscardFormValue(state);
+  state.configForm = nextForm;
+  state.configRaw = resolveDiscardRawValue(state, nextForm);
+  state.configFormDirty = false;
+  state.lastError = null;
+  if (state.configSnapshot) {
+    state.configValid =
+      typeof state.configSnapshot.valid === "boolean" ? state.configSnapshot.valid : null;
+    state.configIssues = Array.isArray(state.configSnapshot.issues)
+      ? state.configSnapshot.issues
+      : [];
+  }
+}
+
 export async function saveConfig(state: ConfigState) {
   if (!state.client || !state.connected) {
     return;

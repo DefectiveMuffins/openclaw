@@ -33,6 +33,7 @@ export type ConfigProps = {
   onSave: () => void;
   onApply: () => void;
   onUpdate: () => void;
+  onDiscard: () => void;
 };
 
 const TAG_SEARCH_PRESETS = [
@@ -402,6 +403,24 @@ function truncateValue(value: unknown, maxLen = 40): string {
   return str.slice(0, maxLen - 3) + "...";
 }
 
+function summarizePendingSections(diff: Array<{ path: string }>): string | null {
+  const sections = Array.from(
+    new Set(
+      diff
+        .map((change) => change.path.split(".")[0]?.trim())
+        .filter((section): section is string => Boolean(section)),
+    ),
+  );
+  if (sections.length === 0) {
+    return null;
+  }
+  const labels = sections.map((section) => humanize(section));
+  if (labels.length <= 3) {
+    return `Touches ${labels.join(", ")}.`;
+  }
+  return `Touches ${labels.slice(0, 3).join(", ")} and ${labels.length - 3} more sections.`;
+}
+
 export function renderConfig(props: ConfigProps) {
   const validity = props.valid == null ? "unknown" : props.valid ? "valid" : "invalid";
   const analysis = analyzeConfigSchema(props.schema);
@@ -463,6 +482,11 @@ export function renderConfig(props: ConfigProps) {
     (props.formMode === "raw" ? true : canSaveForm);
   const canUpdate = props.connected && !props.applying && !props.updating;
   const selectedTags = new Set(getTagFilters(props.searchQuery));
+  const pendingSummary = !hasChanges
+    ? null
+    : props.formMode === "raw"
+      ? "Raw draft differs from the saved config. Review or discard it before applying."
+      : (summarizePendingSections(diff) ?? "Form draft has unsaved changes.");
 
   return html`
     <div class="config-layout">
@@ -505,7 +529,7 @@ export function renderConfig(props: ConfigProps) {
                     class="config-search__clear"
                     @click=${() => props.onSearchChange("")}
                   >
-                    ×
+                    x
                   </button>
                 `
                 : nothing
@@ -540,7 +564,7 @@ export function renderConfig(props: ConfigProps) {
                         </div>
                       `
                 }
-                <span class="config-search__tag-caret" aria-hidden="true">▾</span>
+                <span class="config-search__tag-caret" aria-hidden="true">v</span>
               </summary>
               <div class="config-search__tag-menu">
                 ${TAG_SEARCH_PRESETS.map((tag) => {
@@ -638,31 +662,45 @@ export function renderConfig(props: ConfigProps) {
               ?disabled=${props.loading}
               @click=${props.onReload}
             >
-              ${props.loading ? "Loading…" : "Reload"}
+              ${props.loading ? "Loading..." : "Reload"}
             </button>
+            ${
+              hasChanges
+                ? html`<button class="btn btn--sm" @click=${props.onDiscard}>Discard draft</button>`
+                : nothing
+            }
             <button
               class="btn btn--sm primary"
               ?disabled=${!canSave}
               @click=${props.onSave}
             >
-              ${props.saving ? "Saving…" : "Save"}
+              ${props.saving ? "Saving..." : "Save"}
             </button>
             <button
               class="btn btn--sm"
               ?disabled=${!canApply}
               @click=${props.onApply}
             >
-              ${props.applying ? "Applying…" : "Apply"}
+              ${props.applying ? "Applying..." : "Apply"}
             </button>
             <button
               class="btn btn--sm"
               ?disabled=${!canUpdate}
               @click=${props.onUpdate}
             >
-              ${props.updating ? "Updating…" : "Update"}
+              ${props.updating ? "Updating..." : "Update"}
             </button>
           </div>
         </div>
+
+        ${
+          pendingSummary
+            ? html`<div class="config-draft-summary">
+                <div class="config-draft-summary__title">Draft review</div>
+                <div class="config-draft-summary__text">${pendingSummary}</div>
+              </div>`
+            : nothing
+        }
 
         <!-- Diff panel (form mode only - raw mode doesn't have granular diff) -->
         ${
@@ -767,7 +805,7 @@ export function renderConfig(props: ConfigProps) {
                     ? html`
                         <div class="config-loading">
                           <div class="config-loading__spinner"></div>
-                          <span>Loading schema…</span>
+                          <span>Loading schema...</span>
                         </div>
                       `
                     : renderConfigForm({

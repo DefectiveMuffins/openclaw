@@ -52,17 +52,27 @@ export function renderLogs(props: LogsProps) {
     return matchesFilter(entry, needle);
   });
   const exportLabel = needle || levelFiltered ? "filtered" : "visible";
+  const summaryText =
+    props.entries.length === 0
+      ? "Waiting for log output."
+      : filtered.length === props.entries.length
+        ? `Showing ${filtered.length} entries.`
+        : `Showing ${filtered.length} of ${props.entries.length} entries.`;
+  const emptyText =
+    props.entries.length === 0
+      ? "No log entries yet."
+      : "No log entries match the current filters.";
 
   return html`
     <section class="card">
-      <div class="row" style="justify-content: space-between;">
+      <div class="row" style="justify-content: space-between; gap: 12px; flex-wrap: wrap;">
         <div>
           <div class="card-title">Logs</div>
           <div class="card-sub">Gateway file logs (JSONL).</div>
         </div>
-        <div class="row" style="gap: 8px;">
+        <div class="row" style="gap: 8px; flex-wrap: wrap;">
           <button class="btn" ?disabled=${props.loading} @click=${props.onRefresh}>
-            ${props.loading ? "Loading…" : "Refresh"}
+            ${props.loading ? "Loading..." : "Refresh"}
           </button>
           <button
             class="btn"
@@ -78,8 +88,8 @@ export function renderLogs(props: LogsProps) {
         </div>
       </div>
 
-      <div class="filters" style="margin-top: 14px;">
-        <label class="field" style="min-width: 220px;">
+      <div class="filters logs-filters" style="margin-top: 14px;">
+        <label class="field logs-filter-search">
           <span>Filter</span>
           <input
             .value=${props.filterText}
@@ -87,7 +97,7 @@ export function renderLogs(props: LogsProps) {
             placeholder="Search logs"
           />
         </label>
-        <label class="field checkbox">
+        <label class="field checkbox logs-autofollow-toggle">
           <span>Auto-follow</span>
           <input
             type="checkbox"
@@ -98,7 +108,7 @@ export function renderLogs(props: LogsProps) {
         </label>
       </div>
 
-      <div class="chip-row" style="margin-top: 12px;">
+      <div class="chip-row logs-level-row" style="margin-top: 12px;">
         ${LEVELS.map(
           (level) => html`
             <label class="chip log-chip ${level}">
@@ -114,15 +124,15 @@ export function renderLogs(props: LogsProps) {
         )}
       </div>
 
-      ${
-        props.file
-          ? html`<div class="muted" style="margin-top: 10px;">File: ${props.file}</div>`
-          : nothing
-      }
+      <div class="callout info logs-summary" style="margin-top: 12px;">
+        <div>${summaryText}</div>
+        ${props.file ? html`<div class="muted" style="margin-top: 6px;">File: ${props.file}</div>` : nothing}
+      </div>
+
       ${
         props.truncated
           ? html`
-              <div class="callout" style="margin-top: 10px">Log output truncated; showing latest chunk.</div>
+              <div class="callout" style="margin-top: 10px">Log output truncated; the latest chunk is shown.</div>
             `
           : nothing
       }
@@ -135,18 +145,26 @@ export function renderLogs(props: LogsProps) {
       <div class="log-stream" style="margin-top: 12px;" @scroll=${props.onScroll}>
         ${
           filtered.length === 0
-            ? html`
-                <div class="muted" style="padding: 12px">No log entries.</div>
-              `
+            ? html`<div class="muted" style="padding: 12px">${emptyText}</div>`
             : filtered.map(
                 (entry) => html`
-                <div class="log-row">
-                  <div class="log-time mono">${formatTime(entry.time)}</div>
-                  <div class="log-level ${entry.level ?? ""}">${entry.level ?? ""}</div>
-                  <div class="log-subsystem mono">${entry.subsystem ?? ""}</div>
-                  <div class="log-message mono">${entry.message ?? entry.raw}</div>
-                </div>
-              `,
+                  <article class="log-row">
+                    <div class="log-row__meta">
+                      <div class="log-time mono">${formatTime(entry.time)}</div>
+                      ${
+                        entry.level
+                          ? html`<div class="log-level ${entry.level}">${entry.level}</div>`
+                          : nothing
+                      }
+                      ${
+                        entry.subsystem
+                          ? html`<div class="log-subsystem mono">${entry.subsystem}</div>`
+                          : nothing
+                      }
+                    </div>
+                    <div class="log-message mono">${entry.message ?? entry.raw}</div>
+                  </article>
+                `,
               )
         }
       </div>

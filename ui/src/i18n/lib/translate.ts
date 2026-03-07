@@ -31,12 +31,12 @@ class I18nManager {
 
   private loadLocale() {
     const initialLocale = this.resolveInitialLocale();
+    this.locale = initialLocale;
     if (initialLocale === DEFAULT_LOCALE) {
-      this.locale = DEFAULT_LOCALE;
       return;
     }
-    // Use the normal locale setter so startup locale loading follows the same
-    // translation-loading + notify path as manual locale changes.
+    // Preserve the saved locale immediately so startup UI state reflects the
+    // intended language while translations finish loading.
     void this.setLocale(initialLocale);
   }
 

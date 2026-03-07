@@ -1,63 +1,44 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-function createStorageMock(): Storage {
-  const store = new Map<string, string>();
-  return {
-    get length() {
-      return store.size;
-    },
-    clear() {
-      store.clear();
-    },
-    getItem(key: string) {
-      return store.get(key) ?? null;
-    },
-    key(index: number) {
-      return Array.from(store.keys())[index] ?? null;
-    },
-    removeItem(key: string) {
-      store.delete(key);
-    },
-    setItem(key: string, value: string) {
-      store.set(key, String(value));
-    },
+type WindowWithBasePath = Window &
+  typeof globalThis & {
+    __OPENCLAW_CONTROL_UI_BASE_PATH__?: string;
   };
+
+let originalPath = "/";
+
+function expectedGatewayUrl(basePath: string) {
+  const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+  return `${protocol}://${window.location.host}${basePath}`;
 }
 
 describe("loadSettings default gateway URL derivation", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.stubGlobal("localStorage", createStorageMock());
-    vi.stubGlobal("navigator", { language: "en-US" } as Navigator);
+    localStorage.clear();
+    originalPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    delete (window as WindowWithBasePath).__OPENCLAW_CONTROL_UI_BASE_PATH__;
   });
 
   afterEach(() => {
+    delete (window as WindowWithBasePath).__OPENCLAW_CONTROL_UI_BASE_PATH__;
+    window.history.replaceState({}, "", originalPath);
+    localStorage.clear();
     vi.restoreAllMocks();
-    vi.unstubAllGlobals();
   });
 
   it("uses configured base path and normalizes trailing slash", async () => {
-    vi.stubGlobal("location", {
-      protocol: "https:",
-      host: "gateway.example:8443",
-      pathname: "/ignored/path",
-    } as Location);
-    vi.stubGlobal("window", { __OPENCLAW_CONTROL_UI_BASE_PATH__: " /openclaw/ " } as Window &
-      typeof globalThis);
+    window.history.replaceState({}, "", "/ignored/path");
+    (window as WindowWithBasePath).__OPENCLAW_CONTROL_UI_BASE_PATH__ = " /openclaw/ ";
 
     const { loadSettings } = await import("./storage.ts");
-    expect(loadSettings().gatewayUrl).toBe("wss://gateway.example:8443/openclaw");
+    expect(loadSettings().gatewayUrl).toBe(expectedGatewayUrl("/openclaw"));
   });
 
   it("infers base path from nested pathname when configured base path is not set", async () => {
-    vi.stubGlobal("location", {
-      protocol: "http:",
-      host: "gateway.example:18789",
-      pathname: "/apps/openclaw/chat",
-    } as Location);
-    vi.stubGlobal("window", {} as Window & typeof globalThis);
+    window.history.replaceState({}, "", "/apps/openclaw/chat");
 
     const { loadSettings } = await import("./storage.ts");
-    expect(loadSettings().gatewayUrl).toBe("ws://gateway.example:18789/apps/openclaw");
+    expect(loadSettings().gatewayUrl).toBe(expectedGatewayUrl("/apps/openclaw"));
   });
 });

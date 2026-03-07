@@ -17,17 +17,22 @@ export type LogsState = {
 
 const LOG_BUFFER_LIMIT = 2000;
 const LEVELS = new Set<LogLevel>(["trace", "debug", "info", "warn", "error", "fatal"]);
+const ANSI_ESCAPE_RE = new RegExp(
+  String.raw`\u001B(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001B\\)|[@-_])`,
+  "g",
+);
 
 function parseMaybeJsonString(value: unknown) {
   if (typeof value !== "string") {
     return null;
   }
   const trimmed = value.trim();
-  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+  const sanitized = stripAnsiCodes(trimmed);
+  if (!sanitized.startsWith("{") || !sanitized.endsWith("}")) {
     return null;
   }
   try {
-    const parsed = JSON.parse(trimmed) as unknown;
+    const parsed = JSON.parse(sanitized) as unknown;
     if (!parsed || typeof parsed !== "object") {
       return null;
     }
@@ -45,9 +50,16 @@ function normalizeLevel(value: unknown): LogLevel | null {
   return LEVELS.has(lowered) ? lowered : null;
 }
 
+export function stripAnsiCodes(value: string): string {
+  if (!value) {
+    return value;
+  }
+  return value.replace(ANSI_ESCAPE_RE, "");
+}
+
 export function parseLogLine(line: string): LogEntry {
   if (!line.trim()) {
-    return { raw: line, message: line };
+    return { raw: line, message: stripAnsiCodes(line) };
   }
   try {
     const obj = JSON.parse(line) as Record<string, unknown>;
@@ -87,12 +99,12 @@ export function parseLogLine(line: string): LogEntry {
       raw: line,
       time,
       level,
-      subsystem,
-      message: message ?? line,
+      subsystem: subsystem ? stripAnsiCodes(subsystem) : subsystem,
+      message: stripAnsiCodes(message ?? line),
       meta: meta ?? undefined,
     };
   } catch {
-    return { raw: line, message: line };
+    return { raw: line, message: stripAnsiCodes(line) };
   }
 }
 

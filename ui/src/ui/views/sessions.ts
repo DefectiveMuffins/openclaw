@@ -42,6 +42,23 @@ const VERBOSE_LEVELS = [
 ] as const;
 const REASONING_LEVELS = ["", "off", "on", "stream"] as const;
 
+type SessionRowViewModel = {
+  row: GatewaySessionRow;
+  updated: string;
+  isBinaryThinking: boolean;
+  thinking: string;
+  thinkLevels: string[];
+  verbose: string;
+  verboseLevels: Array<{ value: string; label: string }>;
+  reasoning: string;
+  reasoningLevels: string[];
+  displayName: string | null;
+  label: string;
+  showDisplayName: boolean;
+  canLink: boolean;
+  chatUrl: string | null;
+};
+
 function normalizeProviderId(provider?: string | null): string {
   if (!provider) {
     return "";
@@ -107,6 +124,218 @@ function resolveThinkLevelPatchValue(value: string, isBinary: boolean): string |
   return value;
 }
 
+function buildSessionRowViewModel(row: GatewaySessionRow, basePath: string): SessionRowViewModel {
+  const updated = row.updatedAt ? formatRelativeTimestamp(row.updatedAt) : "n/a";
+  const rawThinking = row.thinkingLevel ?? "";
+  const isBinaryThinking = isBinaryThinkingProvider(row.modelProvider);
+  const thinking = resolveThinkLevelDisplay(rawThinking, isBinaryThinking);
+  const thinkLevels = withCurrentOption(resolveThinkLevelOptions(row.modelProvider), thinking);
+  const verbose = row.verboseLevel ?? "";
+  const verboseLevels = withCurrentLabeledOption(VERBOSE_LEVELS, verbose);
+  const reasoning = row.reasoningLevel ?? "";
+  const reasoningLevels = withCurrentOption(REASONING_LEVELS, reasoning);
+  const displayName =
+    typeof row.displayName === "string" && row.displayName.trim().length > 0
+      ? row.displayName.trim()
+      : null;
+  const label = typeof row.label === "string" ? row.label.trim() : "";
+  const showDisplayName = Boolean(displayName && displayName !== row.key && displayName !== label);
+  const canLink = row.kind !== "global";
+  const chatUrl = canLink
+    ? `${pathForTab("chat", basePath)}?session=${encodeURIComponent(row.key)}`
+    : null;
+
+  return {
+    row,
+    updated,
+    isBinaryThinking,
+    thinking,
+    thinkLevels,
+    verbose,
+    verboseLevels,
+    reasoning,
+    reasoningLevels,
+    displayName,
+    label,
+    showDisplayName,
+    canLink,
+    chatUrl,
+  };
+}
+
+function renderThinkingSelect(
+  view: SessionRowViewModel,
+  onPatch: SessionsProps["onPatch"],
+  disabled: boolean,
+) {
+  return html`
+    <select
+      ?disabled=${disabled}
+      @change=${(e: Event) => {
+        const value = (e.target as HTMLSelectElement).value;
+        onPatch(view.row.key, {
+          thinkingLevel: resolveThinkLevelPatchValue(value, view.isBinaryThinking),
+        });
+      }}
+    >
+      ${view.thinkLevels.map(
+        (level) => html`<option value=${level} ?selected=${view.thinking === level}>
+          ${level || "inherit"}
+        </option>`,
+      )}
+    </select>
+  `;
+}
+
+function renderVerboseSelect(
+  view: SessionRowViewModel,
+  onPatch: SessionsProps["onPatch"],
+  disabled: boolean,
+) {
+  return html`
+    <select
+      ?disabled=${disabled}
+      @change=${(e: Event) => {
+        const value = (e.target as HTMLSelectElement).value;
+        onPatch(view.row.key, { verboseLevel: value || null });
+      }}
+    >
+      ${view.verboseLevels.map(
+        (level) => html`<option value=${level.value} ?selected=${view.verbose === level.value}>
+          ${level.label}
+        </option>`,
+      )}
+    </select>
+  `;
+}
+
+function renderReasoningSelect(
+  view: SessionRowViewModel,
+  onPatch: SessionsProps["onPatch"],
+  disabled: boolean,
+) {
+  return html`
+    <select
+      ?disabled=${disabled}
+      @change=${(e: Event) => {
+        const value = (e.target as HTMLSelectElement).value;
+        onPatch(view.row.key, { reasoningLevel: value || null });
+      }}
+    >
+      ${view.reasoningLevels.map(
+        (level) => html`<option value=${level} ?selected=${view.reasoning === level}>
+          ${level || "inherit"}
+        </option>`,
+      )}
+    </select>
+  `;
+}
+
+function renderLabelInput(
+  view: SessionRowViewModel,
+  onPatch: SessionsProps["onPatch"],
+  disabled: boolean,
+) {
+  return html`
+    <input
+      .value=${view.row.label ?? ""}
+      ?disabled=${disabled}
+      placeholder="(optional)"
+      @change=${(e: Event) => {
+        const value = (e.target as HTMLInputElement).value.trim();
+        onPatch(view.row.key, { label: value || null });
+      }}
+    />
+  `;
+}
+
+function renderSessionActions(
+  view: SessionRowViewModel,
+  onDelete: SessionsProps["onDelete"],
+  disabled: boolean,
+) {
+  return html`
+    <div class="session-actions">
+      ${view.chatUrl ? html`<a class="btn btn--sm" href=${view.chatUrl}>Open chat</a>` : nothing}
+      <button class="btn btn--sm danger" ?disabled=${disabled} @click=${() => onDelete(view.row.key)}>
+        Delete
+      </button>
+    </div>
+  `;
+}
+
+function renderDesktopRow(
+  row: GatewaySessionRow,
+  basePath: string,
+  onPatch: SessionsProps["onPatch"],
+  onDelete: SessionsProps["onDelete"],
+  disabled: boolean,
+) {
+  const view = buildSessionRowViewModel(row, basePath);
+  return html`
+    <div class="table-row session-table-row">
+      <div class="mono session-key-cell">
+        ${view.chatUrl ? html`<a href=${view.chatUrl} class="session-link">${row.key}</a>` : row.key}
+        ${view.showDisplayName ? html`<span class="muted session-key-display-name">${view.displayName}</span>` : nothing}
+      </div>
+      <div>${renderLabelInput(view, onPatch, disabled)}</div>
+      <div>${row.kind}</div>
+      <div>${view.updated}</div>
+      <div>${formatSessionTokens(row)}</div>
+      <div>${renderThinkingSelect(view, onPatch, disabled)}</div>
+      <div>${renderVerboseSelect(view, onPatch, disabled)}</div>
+      <div>${renderReasoningSelect(view, onPatch, disabled)}</div>
+      <div>${renderSessionActions(view, onDelete, disabled)}</div>
+    </div>
+  `;
+}
+
+function renderMobileRow(
+  row: GatewaySessionRow,
+  basePath: string,
+  onPatch: SessionsProps["onPatch"],
+  onDelete: SessionsProps["onDelete"],
+  disabled: boolean,
+) {
+  const view = buildSessionRowViewModel(row, basePath);
+  return html`
+    <article class="session-card">
+      <div class="session-card__header">
+        <div class="session-card__title-wrap">
+          <div class="mono session-card__title">
+            ${view.chatUrl ? html`<a href=${view.chatUrl} class="session-link">${row.key}</a>` : row.key}
+          </div>
+          ${view.showDisplayName ? html`<div class="muted session-card__display-name">${view.displayName}</div>` : nothing}
+        </div>
+        <div class="chip-row session-card__chips">
+          <span class="chip">${row.kind}</span>
+          <span class="chip">${view.updated}</span>
+          <span class="chip">${formatSessionTokens(row)}</span>
+        </div>
+      </div>
+      <div class="session-card__fields">
+        <label class="field">
+          <span>Label</span>
+          ${renderLabelInput(view, onPatch, disabled)}
+        </label>
+        <label class="field">
+          <span>Thinking</span>
+          ${renderThinkingSelect(view, onPatch, disabled)}
+        </label>
+        <label class="field">
+          <span>Verbose</span>
+          ${renderVerboseSelect(view, onPatch, disabled)}
+        </label>
+        <label class="field">
+          <span>Reasoning</span>
+          ${renderReasoningSelect(view, onPatch, disabled)}
+        </label>
+      </div>
+      ${renderSessionActions(view, onDelete, disabled)}
+    </article>
+  `;
+}
+
 export function renderSessions(props: SessionsProps) {
   const rows = props.result?.sessions ?? [];
   return html`
@@ -117,7 +346,7 @@ export function renderSessions(props: SessionsProps) {
           <div class="card-sub">Active session keys and per-session overrides.</div>
         </div>
         <button class="btn" ?disabled=${props.loading} @click=${props.onRefresh}>
-          ${props.loading ? "Loading…" : "Refresh"}
+          ${props.loading ? "Loading..." : "Refresh"}
         </button>
       </div>
 
@@ -188,8 +417,8 @@ export function renderSessions(props: SessionsProps) {
         ${props.result ? `Store: ${props.result.path}` : ""}
       </div>
 
-      <div class="table" style="margin-top: 16px;">
-        <div class="table-head">
+      <div class="sessions-table sessions-table--desktop" style="margin-top: 16px;">
+        <div class="table-head session-table-head">
           <div>Key</div>
           <div>Label</div>
           <div>Kind</div>
@@ -206,116 +435,22 @@ export function renderSessions(props: SessionsProps) {
                 <div class="muted">No sessions found.</div>
               `
             : rows.map((row) =>
-                renderRow(row, props.basePath, props.onPatch, props.onDelete, props.loading),
+                renderDesktopRow(row, props.basePath, props.onPatch, props.onDelete, props.loading),
+              )
+        }
+      </div>
+
+      <div class="sessions-mobile-list" style="margin-top: 16px;">
+        ${
+          rows.length === 0
+            ? html`
+                <div class="muted">No sessions found.</div>
+              `
+            : rows.map((row) =>
+                renderMobileRow(row, props.basePath, props.onPatch, props.onDelete, props.loading),
               )
         }
       </div>
     </section>
-  `;
-}
-
-function renderRow(
-  row: GatewaySessionRow,
-  basePath: string,
-  onPatch: SessionsProps["onPatch"],
-  onDelete: SessionsProps["onDelete"],
-  disabled: boolean,
-) {
-  const updated = row.updatedAt ? formatRelativeTimestamp(row.updatedAt) : "n/a";
-  const rawThinking = row.thinkingLevel ?? "";
-  const isBinaryThinking = isBinaryThinkingProvider(row.modelProvider);
-  const thinking = resolveThinkLevelDisplay(rawThinking, isBinaryThinking);
-  const thinkLevels = withCurrentOption(resolveThinkLevelOptions(row.modelProvider), thinking);
-  const verbose = row.verboseLevel ?? "";
-  const verboseLevels = withCurrentLabeledOption(VERBOSE_LEVELS, verbose);
-  const reasoning = row.reasoningLevel ?? "";
-  const reasoningLevels = withCurrentOption(REASONING_LEVELS, reasoning);
-  const displayName =
-    typeof row.displayName === "string" && row.displayName.trim().length > 0
-      ? row.displayName.trim()
-      : null;
-  const label = typeof row.label === "string" ? row.label.trim() : "";
-  const showDisplayName = Boolean(displayName && displayName !== row.key && displayName !== label);
-  const canLink = row.kind !== "global";
-  const chatUrl = canLink
-    ? `${pathForTab("chat", basePath)}?session=${encodeURIComponent(row.key)}`
-    : null;
-
-  return html`
-    <div class="table-row">
-      <div class="mono session-key-cell">
-        ${canLink ? html`<a href=${chatUrl} class="session-link">${row.key}</a>` : row.key}
-        ${showDisplayName ? html`<span class="muted session-key-display-name">${displayName}</span>` : nothing}
-      </div>
-      <div>
-        <input
-          .value=${row.label ?? ""}
-          ?disabled=${disabled}
-          placeholder="(optional)"
-          @change=${(e: Event) => {
-            const value = (e.target as HTMLInputElement).value.trim();
-            onPatch(row.key, { label: value || null });
-          }}
-        />
-      </div>
-      <div>${row.kind}</div>
-      <div>${updated}</div>
-      <div>${formatSessionTokens(row)}</div>
-      <div>
-        <select
-          ?disabled=${disabled}
-          @change=${(e: Event) => {
-            const value = (e.target as HTMLSelectElement).value;
-            onPatch(row.key, {
-              thinkingLevel: resolveThinkLevelPatchValue(value, isBinaryThinking),
-            });
-          }}
-        >
-          ${thinkLevels.map(
-            (level) =>
-              html`<option value=${level} ?selected=${thinking === level}>
-                ${level || "inherit"}
-              </option>`,
-          )}
-        </select>
-      </div>
-      <div>
-        <select
-          ?disabled=${disabled}
-          @change=${(e: Event) => {
-            const value = (e.target as HTMLSelectElement).value;
-            onPatch(row.key, { verboseLevel: value || null });
-          }}
-        >
-          ${verboseLevels.map(
-            (level) =>
-              html`<option value=${level.value} ?selected=${verbose === level.value}>
-                ${level.label}
-              </option>`,
-          )}
-        </select>
-      </div>
-      <div>
-        <select
-          ?disabled=${disabled}
-          @change=${(e: Event) => {
-            const value = (e.target as HTMLSelectElement).value;
-            onPatch(row.key, { reasoningLevel: value || null });
-          }}
-        >
-          ${reasoningLevels.map(
-            (level) =>
-              html`<option value=${level} ?selected=${reasoning === level}>
-                ${level || "inherit"}
-              </option>`,
-          )}
-        </select>
-      </div>
-      <div>
-        <button class="btn danger" ?disabled=${disabled} @click=${() => onDelete(row.key)}>
-          Delete
-        </button>
-      </div>
-    </div>
   `;
 }

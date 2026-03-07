@@ -227,6 +227,7 @@ function createAgentsProps(overrides: Partial<AgentsProps> = {}): AgentsProps {
     },
     selectedAgentId: "writer",
     activePanel: "overview",
+    basePath: "",
     modelChoices: [{ id: "qwen2.5-coder", name: "Qwen 2.5 Coder", provider: "lmstudio" }],
     modelDiscoveryLoading: false,
     modelDiscoveryError: null,

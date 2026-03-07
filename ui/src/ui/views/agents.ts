@@ -1,4 +1,5 @@
 import { html, nothing } from "lit";
+import { buildAgentMainSessionKey } from "../../../../src/routing/session-key.js";
 import type {
   AgentIdentityResult,
   AgentsFilesListResult,
@@ -39,6 +40,7 @@ export type AgentsProps = {
   agentsList: AgentsListResult | null;
   selectedAgentId: string | null;
   activePanel: AgentsPanel;
+  basePath: string;
   configForm: Record<string, unknown> | null;
   modelChoices: GatewayModelChoice[];
   modelDiscoveryLoading: boolean;
@@ -106,6 +108,12 @@ export type AgentContext = {
   isDefault: boolean;
 };
 
+function buildTabHref(basePath: string, tab: "chat" | "sessions" | "config"): string {
+  const normalized =
+    basePath && basePath !== "/" ? (basePath.endsWith("/") ? basePath.slice(0, -1) : basePath) : "";
+  return `${normalized}/${tab}`;
+}
+
 export function renderAgents(props: AgentsProps) {
   const agents = props.agentsList?.agents ?? [];
   const defaultId = props.agentsList?.defaultId ?? null;
@@ -172,6 +180,7 @@ export function renderAgents(props: AgentsProps) {
                   selectedAgent,
                   defaultId,
                   props.agentIdentityById[selectedAgent.id] ?? null,
+                  props.basePath,
                 )}
                 ${renderAgentTabs(props.activePanel, (panel) => props.onSelectPanel(panel))}
                 ${
@@ -308,11 +317,16 @@ function renderAgentHeader(
   agent: AgentsListResult["agents"][number],
   defaultId: string | null,
   agentIdentity: AgentIdentityResult | null,
+  basePath: string,
 ) {
   const badge = agentBadgeText(agent.id, defaultId);
   const displayName = normalizeAgentLabel(agent);
   const subtitle = agent.identity?.theme?.trim() || "Agent workspace and routing.";
   const emoji = resolveAgentEmoji(agent, agentIdentity);
+  const chatSessionKey = buildAgentMainSessionKey({ agentId: agent.id });
+  const chatUrl = `${buildTabHref(basePath, "chat")}?session=${encodeURIComponent(chatSessionKey)}`;
+  const sessionsUrl = buildTabHref(basePath, "sessions");
+  const configUrl = buildTabHref(basePath, "config");
   return html`
     <section class="card agent-header">
       <div class="agent-header-main">
@@ -325,6 +339,11 @@ function renderAgentHeader(
       <div class="agent-header-meta">
         <div class="mono">${agent.id}</div>
         ${badge ? html`<span class="agent-pill">${badge}</span>` : nothing}
+        <div class="agent-header-actions">
+          <a class="btn btn--sm" href=${chatUrl}>Open chat</a>
+          <a class="btn btn--sm" href=${sessionsUrl}>Sessions</a>
+          <a class="btn btn--sm" href=${configUrl}>Config</a>
+        </div>
       </div>
     </section>
   `;

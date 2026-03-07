@@ -8,6 +8,37 @@ import { formatNextRun } from "../presenter.ts";
 import type { UiSettings } from "../storage.ts";
 import { shouldShowPairingHint } from "./overview-hints.ts";
 
+const AUTH_REQUIRED_CODES = new Set<string>([
+  ConnectErrorDetailCodes.AUTH_REQUIRED,
+  ConnectErrorDetailCodes.AUTH_TOKEN_MISSING,
+  ConnectErrorDetailCodes.AUTH_PASSWORD_MISSING,
+  ConnectErrorDetailCodes.AUTH_TOKEN_NOT_CONFIGURED,
+  ConnectErrorDetailCodes.AUTH_PASSWORD_NOT_CONFIGURED,
+]);
+
+const AUTH_FAILURE_CODES = new Set<string>([
+  ...AUTH_REQUIRED_CODES,
+  ConnectErrorDetailCodes.AUTH_UNAUTHORIZED,
+  ConnectErrorDetailCodes.AUTH_TOKEN_MISMATCH,
+  ConnectErrorDetailCodes.AUTH_PASSWORD_MISMATCH,
+  ConnectErrorDetailCodes.AUTH_DEVICE_TOKEN_MISMATCH,
+  ConnectErrorDetailCodes.AUTH_RATE_LIMITED,
+  ConnectErrorDetailCodes.AUTH_TAILSCALE_IDENTITY_MISSING,
+  ConnectErrorDetailCodes.AUTH_TAILSCALE_PROXY_MISSING,
+  ConnectErrorDetailCodes.AUTH_TAILSCALE_WHOIS_FAILED,
+  ConnectErrorDetailCodes.AUTH_TAILSCALE_IDENTITY_MISMATCH,
+]);
+
+const AUTH_PENDING_CODES = new Set<string>([ConnectErrorDetailCodes.PAIRING_REQUIRED]);
+
+type StatusTone = "ok" | "warn" | "danger" | "neutral";
+
+type OverviewStatus = {
+  label: string;
+  detail: string;
+  tone: StatusTone;
+};
+
 export type OverviewProps = {
   connected: boolean;
   hello: GatewayHelloOk | null;
@@ -27,6 +58,89 @@ export type OverviewProps = {
   onRefresh: () => void;
 };
 
+function resolveTransportStatus(connected: boolean): OverviewStatus {
+  return connected
+    ? { label: "Connected", detail: "WebSocket is live.", tone: "ok" }
+    : { label: "Offline", detail: "No active gateway connection.", tone: "warn" };
+}
+
+function resolveAuthStatus(params: {
+  authMode?: "none" | "token" | "password" | "trusted-proxy";
+  settings: UiSettings;
+  password: string;
+}): OverviewStatus {
+  const { authMode, settings, password } = params;
+  if (authMode === "trusted-proxy") {
+    return { label: "Trusted proxy", detail: "Identity is supplied upstream.", tone: "ok" };
+  }
+  if (authMode === "none") {
+    return {
+      label: "Open auth",
+      detail: "This gateway accepts local control UI access.",
+      tone: "warn",
+    };
+  }
+  const hasToken = Boolean(settings.token.trim());
+  const hasPassword = Boolean(password.trim());
+  if (hasToken && hasPassword) {
+    return { label: "Token + password", detail: "Both credential paths are ready.", tone: "ok" };
+  }
+  if (hasToken) {
+    return { label: "Token ready", detail: "A dashboard token is configured.", tone: "ok" };
+  }
+  if (hasPassword) {
+    return { label: "Password ready", detail: "A shared password is configured.", tone: "ok" };
+  }
+  return {
+    label: "Credentials missing",
+    detail: "Add a token or password before connecting.",
+    tone: "warn",
+  };
+}
+
+function resolveAuthorizationStatus(params: {
+  connected: boolean;
+  lastErrorCode: string | null;
+  lastError: string | null;
+}): OverviewStatus {
+  if (params.connected) {
+    return { label: "Authorized", detail: "Requests are accepted by the gateway.", tone: "ok" };
+  }
+  if (params.lastErrorCode && AUTH_PENDING_CODES.has(params.lastErrorCode)) {
+    return {
+      label: "Pending approval",
+      detail: "Approve the device pairing request first.",
+      tone: "warn",
+    };
+  }
+  const lowered = params.lastError?.toLowerCase() ?? "";
+  if (
+    (params.lastErrorCode && AUTH_FAILURE_CODES.has(params.lastErrorCode)) ||
+    lowered.includes("unauthorized") ||
+    lowered.includes("token mismatch") ||
+    lowered.includes("password mismatch")
+  ) {
+    return {
+      label: "Rejected",
+      detail: "The gateway refused the supplied identity.",
+      tone: "danger",
+    };
+  }
+  return { label: "Unknown", detail: "No successful authorization yet.", tone: "neutral" };
+}
+
+function renderStatusCard(title: string, status: OverviewStatus) {
+  return html`
+    <div class="overview-state-card">
+      <div class="stat-label">${title}</div>
+      <div class="overview-state-card__row">
+        <span class="overview-state-pill overview-state-pill--${status.tone}">${status.label}</span>
+      </div>
+      <div class="muted">${status.detail}</div>
+    </div>
+  `;
+}
+
 export function renderOverview(props: OverviewProps) {
   const snapshot = props.hello?.snapshot as
     | {
@@ -41,6 +155,17 @@ export function renderOverview(props: OverviewProps) {
     : t("common.na");
   const authMode = snapshot?.authMode;
   const isTrustedProxy = authMode === "trusted-proxy";
+  const transportStatus = resolveTransportStatus(props.connected);
+  const authStatus = resolveAuthStatus({
+    authMode,
+    settings: props.settings,
+    password: props.password,
+  });
+  const authorizationStatus = resolveAuthorizationStatus({
+    connected: props.connected,
+    lastErrorCode: props.lastErrorCode,
+    lastError: props.lastError,
+  });
 
   const pairingHint = (() => {
     if (!shouldShowPairingHint(props.connected, props.lastError, props.lastErrorCode)) {
@@ -75,27 +200,8 @@ export function renderOverview(props: OverviewProps) {
       return null;
     }
     const lower = props.lastError.toLowerCase();
-    const authRequiredCodes = new Set<string>([
-      ConnectErrorDetailCodes.AUTH_REQUIRED,
-      ConnectErrorDetailCodes.AUTH_TOKEN_MISSING,
-      ConnectErrorDetailCodes.AUTH_PASSWORD_MISSING,
-      ConnectErrorDetailCodes.AUTH_TOKEN_NOT_CONFIGURED,
-      ConnectErrorDetailCodes.AUTH_PASSWORD_NOT_CONFIGURED,
-    ]);
-    const authFailureCodes = new Set<string>([
-      ...authRequiredCodes,
-      ConnectErrorDetailCodes.AUTH_UNAUTHORIZED,
-      ConnectErrorDetailCodes.AUTH_TOKEN_MISMATCH,
-      ConnectErrorDetailCodes.AUTH_PASSWORD_MISMATCH,
-      ConnectErrorDetailCodes.AUTH_DEVICE_TOKEN_MISMATCH,
-      ConnectErrorDetailCodes.AUTH_RATE_LIMITED,
-      ConnectErrorDetailCodes.AUTH_TAILSCALE_IDENTITY_MISSING,
-      ConnectErrorDetailCodes.AUTH_TAILSCALE_PROXY_MISSING,
-      ConnectErrorDetailCodes.AUTH_TAILSCALE_WHOIS_FAILED,
-      ConnectErrorDetailCodes.AUTH_TAILSCALE_IDENTITY_MISMATCH,
-    ]);
     const authFailed = props.lastErrorCode
-      ? authFailureCodes.has(props.lastErrorCode)
+      ? AUTH_FAILURE_CODES.has(props.lastErrorCode)
       : lower.includes("unauthorized") || lower.includes("connect failed");
     if (!authFailed) {
       return null;
@@ -103,15 +209,15 @@ export function renderOverview(props: OverviewProps) {
     const hasToken = Boolean(props.settings.token.trim());
     const hasPassword = Boolean(props.password.trim());
     const isAuthRequired = props.lastErrorCode
-      ? authRequiredCodes.has(props.lastErrorCode)
+      ? AUTH_REQUIRED_CODES.has(props.lastErrorCode)
       : !hasToken && !hasPassword;
     if (isAuthRequired) {
       return html`
         <div class="muted" style="margin-top: 8px">
           ${t("overview.auth.required")}
           <div style="margin-top: 6px">
-            <span class="mono">openclaw dashboard --no-open</span> → tokenized URL<br />
-            <span class="mono">openclaw doctor --generate-gateway-token</span> → set token
+            <span class="mono">openclaw dashboard --no-open</span> -> tokenized URL<br />
+            <span class="mono">openclaw doctor --generate-gateway-token</span> -> set token
           </div>
           <div style="margin-top: 6px">
             <a
@@ -177,7 +283,7 @@ export function renderOverview(props: OverviewProps) {
             title="Tailscale Serve docs (opens in new tab)"
             >Docs: Tailscale Serve</a
           >
-          <span class="muted"> · </span>
+          <span class="muted"> | </span>
           <a
             class="session-link"
             href="https://docs.openclaw.ai/web/control-ui#insecure-http"
@@ -214,30 +320,30 @@ export function renderOverview(props: OverviewProps) {
             isTrustedProxy
               ? ""
               : html`
-                <label class="field">
-                  <span>${t("overview.access.token")}</span>
-                  <input
-                    .value=${props.settings.token}
-                    @input=${(e: Event) => {
-                      const v = (e.target as HTMLInputElement).value;
-                      props.onSettingsChange({ ...props.settings, token: v });
-                    }}
-                    placeholder="OPENCLAW_GATEWAY_TOKEN"
-                  />
-                </label>
-                <label class="field">
-                  <span>${t("overview.access.password")}</span>
-                  <input
-                    type="password"
-                    .value=${props.password}
-                    @input=${(e: Event) => {
-                      const v = (e.target as HTMLInputElement).value;
-                      props.onPasswordChange(v);
-                    }}
-                    placeholder="system or shared password"
-                  />
-                </label>
-              `
+                  <label class="field">
+                    <span>${t("overview.access.token")}</span>
+                    <input
+                      .value=${props.settings.token}
+                      @input=${(e: Event) => {
+                        const v = (e.target as HTMLInputElement).value;
+                        props.onSettingsChange({ ...props.settings, token: v });
+                      }}
+                      placeholder="OPENCLAW_GATEWAY_TOKEN"
+                    />
+                  </label>
+                  <label class="field">
+                    <span>${t("overview.access.password")}</span>
+                    <input
+                      type="password"
+                      .value=${props.password}
+                      @input=${(e: Event) => {
+                        const v = (e.target as HTMLInputElement).value;
+                        props.onPasswordChange(v);
+                      }}
+                      placeholder="system or shared password"
+                    />
+                  </label>
+                `
           }
           <label class="field">
             <span>${t("overview.access.sessionKey")}</span>
@@ -273,6 +379,12 @@ export function renderOverview(props: OverviewProps) {
             isTrustedProxy ? t("overview.access.trustedProxy") : t("overview.access.connectHint")
           }</span>
         </div>
+
+        <div class="overview-state-grid" style="margin-top: 16px;">
+          ${renderStatusCard("Transport", transportStatus)}
+          ${renderStatusCard("Authentication", authStatus)}
+          ${renderStatusCard("Authorization", authorizationStatus)}
+        </div>
       </div>
 
       <div class="card">
@@ -303,11 +415,11 @@ export function renderOverview(props: OverviewProps) {
         ${
           props.lastError
             ? html`<div class="callout danger" style="margin-top: 14px;">
-              <div>${props.lastError}</div>
-              ${pairingHint ?? ""}
-              ${authHint ?? ""}
-              ${insecureContextHint ?? ""}
-            </div>`
+                <div>${props.lastError}</div>
+                ${pairingHint ?? ""}
+                ${authHint ?? ""}
+                ${insecureContextHint ?? ""}
+              </div>`
             : html`
                 <div class="callout" style="margin-top: 14px">
                   ${t("overview.snapshot.channelsHint")}
@@ -343,9 +455,7 @@ export function renderOverview(props: OverviewProps) {
       <div class="note-grid" style="margin-top: 14px;">
         <div>
           <div class="note-title">${t("overview.notes.tailscaleTitle")}</div>
-          <div class="muted">
-            ${t("overview.notes.tailscaleText")}
-          </div>
+          <div class="muted">${t("overview.notes.tailscaleText")}</div>
         </div>
         <div>
           <div class="note-title">${t("overview.notes.sessionTitle")}</div>

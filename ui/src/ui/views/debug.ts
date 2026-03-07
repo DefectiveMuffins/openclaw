@@ -2,6 +2,52 @@ import { html, nothing } from "lit";
 import type { EventLogEntry } from "../app-events.ts";
 import { formatEventPayload } from "../presenter.ts";
 
+type SafePreset = {
+  label: string;
+  method: string;
+  params: string;
+  description: string;
+};
+
+const SAFE_PRESETS: SafePreset[] = [
+  {
+    label: "Health",
+    method: "health",
+    params: "{}",
+    description: "Gateway health snapshot.",
+  },
+  {
+    label: "Status",
+    method: "status",
+    params: "{}",
+    description: "Gateway status summary.",
+  },
+  {
+    label: "Models",
+    method: "models.list",
+    params: "{}",
+    description: "Visible model catalog.",
+  },
+  {
+    label: "Channels",
+    method: "channels.status",
+    params: '{\n  "probe": false\n}',
+    description: "Channel snapshot without probing.",
+  },
+  {
+    label: "Sessions",
+    method: "sessions.list",
+    params: '{\n  "limit": 20\n}',
+    description: "Recent session rows.",
+  },
+  {
+    label: "Cron",
+    method: "cron.status",
+    params: "{}",
+    description: "Cron scheduler status.",
+  },
+];
+
 export type DebugProps = {
   loading: boolean;
   status: Record<string, unknown> | null;
@@ -18,6 +64,12 @@ export type DebugProps = {
   onRefresh: () => void;
   onCall: () => void;
 };
+
+function runPreset(props: DebugProps, preset: SafePreset) {
+  props.onCallMethodChange(preset.method);
+  props.onCallParamsChange(preset.params);
+  props.onCall();
+}
 
 export function renderDebug(props: DebugProps) {
   const securityAudit =
@@ -41,7 +93,7 @@ export function renderDebug(props: DebugProps) {
             <div class="card-sub">Status, health, and heartbeat data.</div>
           </div>
           <button class="btn" ?disabled=${props.loading} @click=${props.onRefresh}>
-            ${props.loading ? "Refreshing…" : "Refresh"}
+            ${props.loading ? "Refreshing..." : "Refresh"}
           </button>
         </div>
         <div class="stack" style="margin-top: 12px;">
@@ -50,9 +102,9 @@ export function renderDebug(props: DebugProps) {
             ${
               securitySummary
                 ? html`<div class="callout ${securityTone}" style="margin-top: 8px;">
-                  Security audit: ${securityLabel}${info > 0 ? ` · ${info} info` : ""}. Run
-                  <span class="mono">openclaw security audit --deep</span> for details.
-                </div>`
+                    Security audit: ${securityLabel}${info > 0 ? ` | ${info} info` : ""}. Run
+                    <span class="mono">openclaw security audit --deep</span> for details.
+                  </div>`
                 : nothing
             }
             <pre class="code-block">${JSON.stringify(props.status ?? {}, null, 2)}</pre>
@@ -70,7 +122,24 @@ export function renderDebug(props: DebugProps) {
 
       <div class="card">
         <div class="card-title">Manual RPC</div>
-        <div class="card-sub">Send a raw gateway method with JSON params.</div>
+        <div class="card-sub">Run safe presets or send a raw gateway method with JSON params.</div>
+
+        <div class="debug-presets" style="margin-top: 16px;">
+          <div class="label">Safe presets</div>
+          <div class="chip-row" style="margin-top: 8px;">
+            ${SAFE_PRESETS.map(
+              (preset) => html`
+                <button class="btn btn--sm" type="button" @click=${() => runPreset(props, preset)}>
+                  ${preset.label}
+                </button>
+              `,
+            )}
+          </div>
+          <div class="muted" style="margin-top: 8px;">
+            ${SAFE_PRESETS.find((preset) => preset.method === props.callMethod)?.description ?? "These presets only use read-only methods."}
+          </div>
+        </div>
+
         <div class="form-grid" style="margin-top: 16px;">
           <label class="field">
             <span>Method</span>
@@ -84,8 +153,7 @@ export function renderDebug(props: DebugProps) {
             <span>Params (JSON)</span>
             <textarea
               .value=${props.callParams}
-              @input=${(e: Event) =>
-                props.onCallParamsChange((e.target as HTMLTextAreaElement).value)}
+              @input=${(e: Event) => props.onCallParamsChange((e.target as HTMLTextAreaElement).value)}
               rows="6"
             ></textarea>
           </label>
@@ -95,9 +163,7 @@ export function renderDebug(props: DebugProps) {
         </div>
         ${
           props.callError
-            ? html`<div class="callout danger" style="margin-top: 12px;">
-              ${props.callError}
-            </div>`
+            ? html`<div class="callout danger" style="margin-top: 12px;">${props.callError}</div>`
             : nothing
         }
         ${
@@ -127,24 +193,24 @@ export function renderDebug(props: DebugProps) {
               <div class="muted" style="margin-top: 12px">No events yet.</div>
             `
           : html`
-            <div class="list debug-event-log" style="margin-top: 12px;">
-              ${props.eventLog.map(
-                (evt) => html`
-                  <div class="list-item debug-event-log__item">
-                    <div class="list-main">
-                      <div class="list-title">${evt.event}</div>
-                      <div class="list-sub">${new Date(evt.ts).toLocaleTimeString()}</div>
+              <div class="list debug-event-log" style="margin-top: 12px;">
+                ${props.eventLog.map(
+                  (evt) => html`
+                    <div class="list-item debug-event-log__item">
+                      <div class="list-main">
+                        <div class="list-title">${evt.event}</div>
+                        <div class="list-sub">${new Date(evt.ts).toLocaleTimeString()}</div>
+                      </div>
+                      <div class="list-meta debug-event-log__meta">
+                        <pre class="code-block debug-event-log__payload">${formatEventPayload(
+                          evt.payload,
+                        )}</pre>
+                      </div>
                     </div>
-                    <div class="list-meta debug-event-log__meta">
-                      <pre class="code-block debug-event-log__payload">${formatEventPayload(
-                        evt.payload,
-                      )}</pre>
-                    </div>
-                  </div>
-                `,
-              )}
-            </div>
-          `
+                  `,
+                )}
+              </div>
+            `
       }
     </section>
   `;

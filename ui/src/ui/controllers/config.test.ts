@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   applyConfigSnapshot,
   applyConfig,
+  discardConfigDraft,
   runUpdate,
   saveConfig,
   updateConfigFormValue,
@@ -146,6 +147,30 @@ describe("updateConfigFormValue", () => {
   });
 });
 
+describe("discardConfigDraft", () => {
+  it("restores the last clean form and raw snapshot", () => {
+    const state = createState();
+    state.configSnapshot = {
+      config: { gateway: { mode: "local" } },
+      valid: true,
+      issues: [],
+      raw: "{\n}\n",
+    };
+    state.configFormOriginal = { gateway: { mode: "local" } };
+    state.configRawOriginal = '{\n  "gateway": { "mode": "local" }\n}\n';
+    state.configForm = { gateway: { mode: "remote" } };
+    state.configRaw = "remote draft";
+    state.configFormDirty = true;
+    state.lastError = "Broken draft";
+
+    discardConfigDraft(state);
+
+    expect(state.configForm).toEqual({ gateway: { mode: "local" } });
+    expect(state.configRaw).toBe('{\n  "gateway": { "mode": "local" }\n}\n');
+    expect(state.configFormDirty).toBe(false);
+    expect(state.lastError).toBeNull();
+  });
+});
 describe("applyConfig", () => {
   it("sends config.apply with raw and session key", async () => {
     const request = vi.fn().mockResolvedValue({});

@@ -619,3 +619,14 @@
     grid-template-columns: 1fr;
   }
 }
+
+.nav-item {
+  scroll-snap-align: start;
+}
+
+.nav-scroll-hint {
+  display: none;
+  padding: 0 16px;
+  color: var(--muted);
+  font-size: 11px;
+}

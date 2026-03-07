@@ -18,6 +18,7 @@ import { loadChannels } from "./controllers/channels.ts";
 import { loadChatHistory } from "./controllers/chat.ts";
 import {
   applyConfig,
+  discardConfigDraft,
   loadConfig,
   runUpdate,
   saveConfig,
@@ -35,7 +36,7 @@ import {
   addCronJob,
   startCronEdit,
   startCronClone,
-  cancelCronEdit,
+  resetCronDraft,
   validateCronForm,
   hasCronFormErrors,
   normalizeCronFormState,
@@ -311,6 +312,7 @@ export function renderApp(state: AppViewState) {
         </div>
       </aside>
       <main class="content ${isChat ? "content--chat" : ""}">
+        <div class="nav-scroll-hint">Swipe the tab bar to reach more pages.</div>
         ${
           availableUpdate
             ? html`<div class="update-banner callout danger" role="alert">
@@ -464,7 +466,7 @@ export function renderApp(state: AppViewState) {
                 error: state.cronError,
                 busy: state.cronBusy,
                 form: state.cronForm,
-                fieldErrors: state.cronFieldErrors,
+                fieldErrors: state.cronFormTouched ? state.cronFieldErrors : {},
                 canSubmit: !hasCronFormErrors(state.cronFieldErrors),
                 editingJobId: state.cronEditingJobId,
                 channels: state.channelsSnapshot?.channelMeta?.length
@@ -491,13 +493,40 @@ export function renderApp(state: AppViewState) {
                 accountSuggestions,
                 onFormChange: (patch) => {
                   state.cronForm = normalizeCronFormState({ ...state.cronForm, ...patch });
-                  state.cronFieldErrors = validateCronForm(state.cronForm);
+                  state.cronFieldErrors = state.cronFormTouched
+                    ? validateCronForm(state.cronForm)
+                    : {};
                 },
                 onRefresh: () => state.loadCron(),
-                onAdd: () => addCronJob(state),
-                onEdit: (job) => startCronEdit(state, job),
-                onClone: (job) => startCronClone(state, job),
-                onCancelEdit: () => cancelCronEdit(state),
+                onAdd: () => {
+                  void (async () => {
+                    state.cronFormTouched = true;
+                    state.cronFieldErrors = validateCronForm(state.cronForm);
+                    if (hasCronFormErrors(state.cronFieldErrors)) {
+                      return;
+                    }
+                    await addCronJob(state);
+                    if (!state.cronError) {
+                      state.cronFormTouched = false;
+                    }
+                  })();
+                },
+                onEdit: (job) => {
+                  startCronEdit(state, job);
+                  state.cronFormTouched = false;
+                },
+                onClone: (job) => {
+                  startCronClone(state, job);
+                  state.cronFormTouched = false;
+                },
+                onCancelEdit: () => {
+                  resetCronDraft(state);
+                  state.cronFormTouched = false;
+                },
+                onResetDraft: () => {
+                  resetCronDraft(state);
+                  state.cronFormTouched = false;
+                },
                 onToggle: (job, enabled) => toggleCronJob(state, job, enabled),
                 onRun: (job, mode) => runCronJob(state, job, mode ?? "force"),
                 onRemove: (job) => removeCronJob(state, job),
@@ -549,6 +578,7 @@ export function renderApp(state: AppViewState) {
                 agentsList: state.agentsList,
                 selectedAgentId: resolvedAgentId,
                 activePanel: state.agentsPanel,
+                basePath: state.basePath,
                 configForm: configValue,
                 modelChoices: state.agentModelChoices,
                 modelDiscoveryLoading: state.agentModelDiscoveryLoading,
@@ -1124,6 +1154,7 @@ export function renderApp(state: AppViewState) {
                 onSave: () => saveConfig(state),
                 onApply: () => applyConfig(state),
                 onUpdate: () => runUpdate(state),
+                onDiscard: () => discardConfigDraft(state),
               })
             : nothing
         }

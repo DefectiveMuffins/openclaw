@@ -325,6 +325,7 @@ export class OpenClawApp extends LitElement {
   @state() cronError: string | null = null;
   @state() cronForm: CronFormState = { ...DEFAULT_CRON_FORM };
   @state() cronFieldErrors: CronFieldErrors = {};
+  @state() cronFormTouched = false;
   @state() cronEditingJobId: string | null = null;
   @state() cronRunsJobId: string | null = null;
   @state() cronRunsLoadingMore = false;

@@ -557,4 +557,34 @@ export const usageStylesPart3 = `
     color: var(--text);
     border-color: var(--border-strong);
   }
+  @media (max-width: 600px) {
+    .usage-header-row {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .usage-header-metrics {
+      flex-wrap: wrap;
+      justify-content: flex-start;
+    }
+
+    .usage-controls {
+      width: 100%;
+    }
+
+    .usage-presets {
+      flex-wrap: wrap;
+    }
+
+    .usage-query-bar {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .usage-query-actions {
+      width: 100%;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+  }
 `;

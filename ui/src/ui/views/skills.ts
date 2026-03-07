@@ -43,7 +43,7 @@ export function renderSkills(props: SkillsProps) {
           <div class="card-sub">Bundled, managed, and workspace skills.</div>
         </div>
         <button class="btn" ?disabled=${props.loading} @click=${props.onRefresh}>
-          ${props.loading ? "Loading…" : "Refresh"}
+          ${props.loading ? "Loading..." : "Refresh"}
         </button>
       </div>
 
@@ -59,6 +59,10 @@ export function renderSkills(props: SkillsProps) {
         <div class="muted">${filtered.length} shown</div>
       </div>
 
+      <div class="callout" style="margin-top: 12px;">
+        Enable a skill, install missing bins, or save the required API key from one place.
+      </div>
+
       ${
         props.error
           ? html`<div class="callout danger" style="margin-top: 12px;">${props.error}</div>`
@@ -68,26 +72,29 @@ export function renderSkills(props: SkillsProps) {
       ${
         filtered.length === 0
           ? html`
-              <div class="muted" style="margin-top: 16px">No skills found.</div>
+              <div class="muted" style="margin-top: 16px">
+                No skills found. Clear the filter or refresh to reload the catalog.
+              </div>
             `
           : html`
-            <div class="agent-skills-groups" style="margin-top: 16px;">
-              ${groups.map((group) => {
-                const collapsedByDefault = group.id === "workspace" || group.id === "built-in";
-                return html`
-                  <details class="agent-skills-group" ?open=${!collapsedByDefault}>
-                    <summary class="agent-skills-header">
-                      <span>${group.label}</span>
-                      <span class="muted">${group.skills.length}</span>
-                    </summary>
-                    <div class="list skills-grid">
-                      ${group.skills.map((skill) => renderSkill(skill, props))}
-                    </div>
-                  </details>
-                `;
-              })}
-            </div>
-          `
+              <div class="agent-skills-groups" style="margin-top: 16px;">
+                ${groups.map((group) => {
+                  const shouldOpen =
+                    group.skills.length <= 8 || Boolean(filter) || group.id === "built-in";
+                  return html`
+                    <details class="agent-skills-group" data-group-id=${group.id} ?open=${shouldOpen}>
+                      <summary class="agent-skills-header">
+                        <span>${group.label}</span>
+                        <span class="muted">${group.skills.length}</span>
+                      </summary>
+                      <div class="list skills-grid">
+                        ${group.skills.map((skill) => renderSkill(skill, props))}
+                      </div>
+                    </details>
+                  `;
+                })}
+              </div>
+            `
       }
     </section>
   `;
@@ -144,7 +151,7 @@ function renderSkill(skill: SkillStatusEntry, props: SkillsProps) {
                 ?disabled=${busy}
                 @click=${() => props.onInstall(skill.skillKey, skill.name, skill.install[0].id)}
               >
-                ${busy ? "Installing…" : skill.install[0].label}
+                ${busy ? "Installing..." : skill.install[0].label}
               </button>`
               : nothing
           }

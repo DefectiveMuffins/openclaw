@@ -28,11 +28,12 @@ import {
 import { loadNodes } from "./controllers/nodes.ts";
 import { loadSessions } from "./controllers/sessions.ts";
 import {
+  GatewayBrowserClient,
   resolveGatewayErrorDetailCode,
+  type GatewayBrowserClientOptions,
   type GatewayEventFrame,
   type GatewayHelloOk,
 } from "./gateway.ts";
-import { GatewayBrowserClient } from "./gateway.ts";
 import type { Tab } from "./navigation.ts";
 import type { UiSettings } from "./storage.ts";
 import type {
@@ -136,24 +137,13 @@ function applySessionDefaults(host: GatewayHost, defaults?: SessionDefaultsSnaps
   }
 }
 
-export function connectGateway(host: GatewayHost) {
-  host.lastError = null;
-  host.lastErrorCode = null;
-  host.hello = null;
-  host.connected = false;
-  host.execApprovalQueue = [];
-  host.execApprovalError = null;
-
-  const previousClient = host.client;
-  const client = new GatewayBrowserClient({
-    url: host.settings.gatewayUrl,
-    token: host.settings.token.trim() ? host.settings.token : undefined,
-    password: host.password.trim() ? host.password : undefined,
-    clientName: "openclaw-control-ui",
-    mode: "webchat",
-    instanceId: host.clientInstanceId,
+export function createGatewayClientHandlers(
+  host: GatewayHost,
+  isActiveClient: () => boolean,
+): Pick<GatewayBrowserClientOptions, "onHello" | "onClose" | "onEvent" | "onGap"> {
+  return {
     onHello: (hello) => {
-      if (host.client !== client) {
+      if (!isActiveClient()) {
         return;
       }
       host.connected = true;
@@ -175,7 +165,7 @@ export function connectGateway(host: GatewayHost) {
       void refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
     },
     onClose: ({ code, reason, error }) => {
-      if (host.client !== client) {
+      if (!isActiveClient()) {
         return;
       }
       host.connected = false;
@@ -195,18 +185,39 @@ export function connectGateway(host: GatewayHost) {
       }
     },
     onEvent: (evt) => {
-      if (host.client !== client) {
+      if (!isActiveClient()) {
         return;
       }
       handleGatewayEvent(host, evt);
     },
     onGap: ({ expected, received }) => {
-      if (host.client !== client) {
+      if (!isActiveClient()) {
         return;
       }
       host.lastError = `event gap detected (expected seq ${expected}, got ${received}); refresh recommended`;
       host.lastErrorCode = null;
     },
+  };
+}
+
+export function connectGateway(host: GatewayHost) {
+  host.lastError = null;
+  host.lastErrorCode = null;
+  host.hello = null;
+  host.connected = false;
+  host.execApprovalQueue = [];
+  host.execApprovalError = null;
+
+  const previousClient = host.client;
+  let client: GatewayBrowserClient;
+  client = new GatewayBrowserClient({
+    url: host.settings.gatewayUrl,
+    token: host.settings.token.trim() ? host.settings.token : undefined,
+    password: host.password.trim() ? host.password : undefined,
+    clientName: "openclaw-control-ui",
+    mode: "webchat",
+    instanceId: host.clientInstanceId,
+    ...createGatewayClientHandlers(host, () => host.client === client),
   });
   host.client = client;
   previousClient?.stop();

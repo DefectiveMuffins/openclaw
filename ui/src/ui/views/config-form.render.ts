@@ -292,19 +292,14 @@ function matchesSearch(params: {
   const q = criteria.text;
   const meta = SECTION_META[params.key];
 
-  // Check key name
-  if (q && params.key.toLowerCase().includes(q)) {
+  const sectionSelfMatches =
+    criteria.tags.length === 0 &&
+    q !== "" &&
+    (params.key.toLowerCase().includes(q) ||
+      (meta?.label.toLowerCase().includes(q) ?? false) ||
+      (meta?.description.toLowerCase().includes(q) ?? false));
+  if (sectionSelfMatches) {
     return true;
-  }
-
-  // Check label and description
-  if (q && meta) {
-    if (meta.label.toLowerCase().includes(q)) {
-      return true;
-    }
-    if (meta.description.toLowerCase().includes(q)) {
-      return true;
-    }
   }
 
   return matchesNodeSearch({

@@ -376,7 +376,7 @@ function clearCronEditState(state: CronState) {
 
 function resetCronFormToDefaults(state: CronState) {
   state.cronForm = { ...DEFAULT_CRON_FORM };
-  state.cronFieldErrors = validateCronForm(state.cronForm);
+  state.cronFieldErrors = {};
 }
 
 function formatDateTimeLocal(input: string): string {
@@ -885,7 +885,7 @@ export function startCronEdit(state: CronState, job: CronJob) {
   state.cronEditingJobId = job.id;
   state.cronRunsJobId = job.id;
   state.cronForm = jobToForm(job, state.cronForm);
-  state.cronFieldErrors = validateCronForm(state.cronForm);
+  state.cronFieldErrors = {};
 }
 
 function buildCloneName(name: string, existingNames: Set<string>) {
@@ -912,10 +912,14 @@ export function startCronClone(state: CronState, job: CronJob) {
   const cloned = jobToForm(job, state.cronForm);
   cloned.name = buildCloneName(job.name, existingNames);
   state.cronForm = cloned;
-  state.cronFieldErrors = validateCronForm(state.cronForm);
+  state.cronFieldErrors = {};
+}
+
+export function resetCronDraft(state: CronState) {
+  clearCronEditState(state);
+  resetCronFormToDefaults(state);
 }
 
 export function cancelCronEdit(state: CronState) {
-  clearCronEditState(state);
-  resetCronFormToDefaults(state);
+  resetCronDraft(state);
 }

@@ -64,6 +64,7 @@ function createProps(overrides: Partial<CronProps> = {}): CronProps {
     onEdit: () => undefined,
     onClone: () => undefined,
     onCancelEdit: () => undefined,
+    onResetDraft: () => undefined,
     onToggle: () => undefined,
     onRun: () => undefined,
     onRemove: () => undefined,
@@ -737,5 +738,44 @@ describe("cron view", () => {
     expect(
       container.querySelector('input[list="cron-delivery-account-suggestions"]'),
     ).not.toBeNull();
+  });
+  it("shows a draft preview for unsaved jobs", () => {
+    const container = document.createElement("div");
+    render(
+      renderCron(
+        createProps({
+          form: {
+            ...DEFAULT_CRON_FORM,
+            name: "Morning digest",
+            scheduleKind: "every",
+            everyAmount: "2",
+            everyUnit: "hours",
+            payloadText: "Send the digest",
+            deliveryMode: "announce",
+            deliveryTo: "ops-room",
+            sessionTarget: "isolated",
+          },
+          channels: ["last"],
+        }),
+      ),
+      container,
+    );
+
+    expect(container.textContent).toContain("Draft preview");
+    expect(container.textContent).toContain("Every 2 hours");
+    expect(container.textContent).toContain("Send the digest");
+  });
+
+  it("offers a reset button while creating a new job", () => {
+    const container = document.createElement("div");
+    const onResetDraft = vi.fn();
+    render(renderCron(createProps({ onResetDraft })), container);
+
+    const resetButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Reset draft",
+    );
+    expect(resetButton).not.toBeUndefined();
+    resetButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onResetDraft).toHaveBeenCalled();
   });
 });
