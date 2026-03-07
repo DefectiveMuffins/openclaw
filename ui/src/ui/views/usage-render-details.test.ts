@@ -21,11 +21,7 @@ function collectTemplateMarkup(value: unknown): string {
   if (Array.isArray(value)) {
     return value.map((entry) => collectTemplateMarkup(entry)).join("");
   }
-  if (
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "bigint"
-  ) {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "bigint") {
     return String(value);
   }
   if (typeof value !== "object") {
@@ -293,7 +289,9 @@ describe("usage overview cards", () => {
               },
             },
           ],
-          daily: [{ date: "2026-03-05", tokens: 1000, cost: 1, messages: 10, toolCalls: 2, errors: 1 }],
+          daily: [
+            { date: "2026-03-05", tokens: 1000, cost: 1, messages: 10, toolCalls: 2, errors: 1 },
+          ],
         },
         {
           durationSumMs: 60000,

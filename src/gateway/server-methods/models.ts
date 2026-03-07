@@ -45,7 +45,7 @@ function normalizeString(value: unknown): string {
 function sortModelChoices<T extends { provider: string; name: string; id: string }>(
   models: T[],
 ): T[] {
-  return [...models].sort((left, right) => {
+  return models.toSorted((left, right) => {
     const providerCmp = left.provider.localeCompare(right.provider);
     if (providerCmp !== 0) {
       return providerCmp;
@@ -108,7 +108,7 @@ function buildOpenAiCompatDiscoveryUrls(baseUrl: string): string[] {
 async function discoverOpenAiCompatModels(params: DiscoveryProviderConfig) {
   if (!OPENAI_COMPAT_APIS.has(params.api)) {
     throw new Error(
-      `provider \"${params.providerId}\" uses unsupported api \"${params.api}\" for live discovery`,
+      `provider "${params.providerId}" uses unsupported api "${params.api}" for live discovery`,
     );
   }
 
@@ -150,8 +150,8 @@ async function discoverOpenAiCompatModels(params: DiscoveryProviderConfig) {
 
   throw new Error(
     lastError
-      ? `failed to discover models for provider \"${params.providerId}\": ${lastError}`
-      : `failed to discover models for provider \"${params.providerId}\"`,
+      ? `failed to discover models for provider "${params.providerId}": ${lastError}`
+      : `failed to discover models for provider "${params.providerId}"`,
   );
 }
 
@@ -215,7 +215,7 @@ export const modelsHandlers: GatewayRequestHandlers = {
           undefined,
           errorShape(
             ErrorCodes.INVALID_REQUEST,
-            `provider \"${providerId}\" is not configured for model discovery`,
+            `provider "${providerId}" is not configured for model discovery`,
           ),
         );
         return;

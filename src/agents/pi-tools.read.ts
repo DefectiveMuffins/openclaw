@@ -11,8 +11,8 @@ import {
 } from "../infra/fs-safe.js";
 import { detectMime } from "../media/mime.js";
 import { sniffMimeFromBase64 } from "../media/sniff-mime-from-base64.js";
-import type { ImageSanitizationLimits } from "./image-sanitization.js";
 import { checkFsAccess, type FsAccessOperation } from "./fs-path-access.js";
+import type { ImageSanitizationLimits } from "./image-sanitization.js";
 import { toRelativeWorkspacePath } from "./path-policy.js";
 import type { AnyAgentTool } from "./pi-tools.types.js";
 import { assertSandboxPath } from "./sandbox-paths.js";

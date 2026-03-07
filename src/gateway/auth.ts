@@ -161,8 +161,8 @@ export function isPrivateNetworkDirectRequest(
 
   const hasForwarded = Boolean(
     req.headers?.["x-forwarded-for"] ||
-      req.headers?.["x-real-ip"] ||
-      req.headers?.["x-forwarded-host"],
+    req.headers?.["x-real-ip"] ||
+    req.headers?.["x-forwarded-host"],
   );
   if (hasForwarded) {
     return false;

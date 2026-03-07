@@ -23,7 +23,6 @@ const {
   extractKimiCitations,
 } = __testing;
 
-
 describe("web_search duckduckgo fallback", () => {
   it("defaults to duckduckgo when no provider key is configured", () => {
     withEnv(
@@ -56,8 +55,7 @@ describe("web_search duckduckgo fallback", () => {
 
   it("parses duckduckgo html results into title, url, and description", () => {
     const results = parseDuckDuckGoHtmlResults({
-      html:
-        `<div class="result"><a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpost">GPT-5.4 &amp; launch</a><div class="result__snippet">Latest model update &lt;verified&gt;</div></div>`,
+      html: `<div class="result"><a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fpost">GPT-5.4 &amp; launch</a><div class="result__snippet">Latest model update &lt;verified&gt;</div></div>`,
       count: 5,
     });
     expect(results).toEqual([

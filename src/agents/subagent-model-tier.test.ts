@@ -14,4 +14,3 @@ describe("classifyTaskComplexity", () => {
     expect(classifyTaskComplexity("handle this")).toBe("complex");
   });
 });
-

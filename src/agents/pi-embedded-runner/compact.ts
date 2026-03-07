@@ -33,12 +33,12 @@ import { formatUserTime, resolveUserTimeFormat, resolveUserTimezone } from "../d
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../defaults.js";
 import { resolveOpenClawDocsPath } from "../docs-path.js";
 import { getApiKeyForModel, resolveModelAuthMode } from "../model-auth.js";
-import { ensureOpenClawModelsJson } from "../models-config.js";
 import {
   parseModelRef,
   resolvePhaseAwareThinkLevel,
   resolveStageAwareModelSelection,
 } from "../model-selection.js";
+import { ensureOpenClawModelsJson } from "../models-config.js";
 import { resolveOwnerDisplaySetting } from "../owner-display.js";
 import {
   ensureSessionHeader,
@@ -49,7 +49,6 @@ import { createPreparedEmbeddedPiSettingsManager } from "../pi-project-settings.
 import { createOpenClawCodingTools } from "../pi-tools.js";
 import { resolveEffectiveToolPolicy } from "../pi-tools.policy.js";
 import { resolveSandboxContext } from "../sandbox.js";
-import { invalidateToolResultCache } from "../tool-result-cache.js";
 import { repairSessionFileIfNeeded } from "../session-file-repair.js";
 import { guardSessionManager } from "../session-tool-result-guard-wrapper.js";
 import { sanitizeToolUseResultPairing } from "../session-transcript-repair.js";
@@ -65,6 +64,7 @@ import {
   resolveSkillsPromptForRun,
   type SkillSnapshot,
 } from "../skills.js";
+import { invalidateToolResultCache } from "../tool-result-cache.js";
 import { resolveTranscriptPolicy } from "../transcript-policy.js";
 import {
   compactWithSafetyTimeout,
@@ -796,4 +796,3 @@ export async function compactEmbeddedPiSession(
     enqueueGlobal(async () => compactEmbeddedPiSessionDirect(params)),
   );
 }
-

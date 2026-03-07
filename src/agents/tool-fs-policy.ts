@@ -13,11 +13,7 @@ function normalizePathList(list?: string[]): string[] | undefined {
     return undefined;
   }
   const normalized = Array.from(
-    new Set(
-      list
-        .map((entry) => entry.trim())
-        .filter((entry) => entry.length > 0),
-    ),
+    new Set(list.map((entry) => entry.trim()).filter((entry) => entry.length > 0)),
   );
   return normalized.length > 0 ? normalized : undefined;
 }

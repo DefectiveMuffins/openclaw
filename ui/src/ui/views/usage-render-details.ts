@@ -754,8 +754,10 @@ function renderAgenticPanel(session: UsageSessionEntry) {
   if (!routing && !memorySearch && !delegation) {
     return html`
       <div class="context-details-panel">
-        <div class="card-title" style="font-size: 12px; color: var(--text);">RAG and Delegation</div>
-        <div class="muted" style="padding: 8px 0;">No staged retrieval or delegation signals captured for this session.</div>
+        <div class="card-title" style="font-size: 12px; color: var(--text)">RAG and Delegation</div>
+        <div class="muted" style="padding: 8px 0">
+          No staged retrieval or delegation signals captured for this session.
+        </div>
       </div>
     `;
   }
@@ -764,8 +766,9 @@ function renderAgenticPanel(session: UsageSessionEntry) {
     <div class="context-details-panel">
       <div class="card-title" style="font-size: 12px; color: var(--text);">RAG and Delegation</div>
       <div class="context-breakdown-grid">
-        ${routing
-          ? html`
+        ${
+          routing
+            ? html`
               <div class="context-breakdown-card">
                 <div class="context-breakdown-title">Routing</div>
                 <div class="context-breakdown-list">
@@ -777,9 +780,11 @@ function renderAgenticPanel(session: UsageSessionEntry) {
                 </div>
               </div>
             `
-          : nothing}
-        ${memorySearch
-          ? html`
+            : nothing
+        }
+        ${
+          memorySearch
+            ? html`
               <div class="context-breakdown-card">
                 <div class="context-breakdown-title">Retrieval</div>
                 <div class="context-breakdown-list">
@@ -793,9 +798,11 @@ function renderAgenticPanel(session: UsageSessionEntry) {
                 </div>
               </div>
             `
-          : nothing}
-        ${delegation
-          ? html`
+            : nothing
+        }
+        ${
+          delegation
+            ? html`
               <div class="context-breakdown-card">
                 <div class="context-breakdown-title">Delegation</div>
                 <div class="context-breakdown-list">
@@ -803,12 +810,16 @@ function renderAgenticPanel(session: UsageSessionEntry) {
                   <div class="context-breakdown-item"><span>Accepted</span><span>${delegation.accepted}</span></div>
                   <div class="context-breakdown-item"><span>Structured</span><span>${delegation.structuredResponses}</span></div>
                   <div class="context-breakdown-item"><span>Read-only</span><span>${delegation.readOnlySpawns}</span></div>
-                  <div class="context-breakdown-item"><span>Roles</span><span>${joinCompactList(delegation.roles.map((role) => `${role.role} x${role.count}`), 2)}</span></div>
+                  <div class="context-breakdown-item"><span>Roles</span><span>${joinCompactList(
+                    delegation.roles.map((role) => `${role.role} x${role.count}`),
+                    2,
+                  )}</span></div>
                   <div class="context-breakdown-item"><span>Models</span><span class="mono">${joinCompactList(delegation.modelsApplied, 2)}</span></div>
                 </div>
               </div>
             `
-          : nothing}
+            : nothing
+        }
       </div>
     </div>
   `;

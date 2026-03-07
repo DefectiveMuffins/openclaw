@@ -1,5 +1,4 @@
 import type { ToolLoopDetectionConfig, ToolResultCacheConfig } from "../config/types.tools.js";
-import type { ToolWorkingSetConfig } from "./tool-working-set.js";
 import type { SessionState } from "../logging/diagnostic-session-state.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
@@ -15,6 +14,7 @@ import {
   isToolResultCacheInvalidationTool,
   setCachedToolResult,
 } from "./tool-result-cache.js";
+import type { ToolWorkingSetConfig } from "./tool-working-set.js";
 import { addToolResultToWorkingSet, invalidateWorkingSet } from "./tool-working-set.js";
 import type { AnyAgentTool } from "./tools/common.js";
 
@@ -349,4 +349,3 @@ export const __testing = {
   runBeforeToolCallHook,
   isPlainObject,
 };
-

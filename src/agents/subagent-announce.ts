@@ -10,8 +10,6 @@ import {
   updateSessionStoreEntry,
 } from "../config/sessions.js";
 import { callGateway } from "../gateway/call.js";
-import { resolveSessionAgentId } from "./agent-scope.js";
-import { resolveMemorySearchConfig } from "./memory-search.js";
 import { createBoundDeliveryRouter } from "../infra/outbound/bound-delivery-router.js";
 import type { ConversationRef } from "../infra/outbound/session-binding-service.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
@@ -25,19 +23,15 @@ import {
   normalizeDeliveryContext,
 } from "../utils/delivery-context.js";
 import { isDeliverableMessageChannel, isInternalMessageChannel } from "../utils/message-channel.js";
+import { resolveSessionAgentId } from "./agent-scope.js";
+import { applyDelegationDeltaToAgenticCounters } from "./agentic-counters.js";
 import {
   buildAnnounceIdFromChildRun,
   buildAnnounceIdempotencyKey,
   resolveQueueAnnounceId,
 } from "./announce-idempotency.js";
-import { applyDelegationDeltaToAgenticCounters } from "./agentic-counters.js";
 import { formatAgentInternalEventsForPrompt, type AgentInternalEvent } from "./internal-events.js";
-import {
-  buildDelegationContractPromptLines,
-  getSubagentReportWorkingSetText,
-  type SubagentDelegationRole,
-  type SubagentResponseFormat,
-} from "./subagent-result-contract.js";
+import { resolveMemorySearchConfig } from "./memory-search.js";
 import {
   isEmbeddedPiRunActive,
   queueEmbeddedPiMessage,
@@ -50,6 +44,12 @@ import {
 import { type AnnounceQueueItem, enqueueAnnounce } from "./subagent-announce-queue.js";
 import { getSubagentDepthFromSessionStore } from "./subagent-depth.js";
 import { summarizeDelegationReportMetrics } from "./subagent-metrics.js";
+import {
+  buildDelegationContractPromptLines,
+  getSubagentReportWorkingSetText,
+  type SubagentDelegationRole,
+  type SubagentResponseFormat,
+} from "./subagent-result-contract.js";
 import type { SpawnSubagentMode } from "./subagent-spawn.js";
 import { addSubagentReportToWorkingSet } from "./tool-working-set.js";
 import { readLatestAssistantReply } from "./tools/agent-step.js";

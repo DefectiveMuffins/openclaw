@@ -21,12 +21,12 @@ import {
   evaluateContextWindowGuard,
   resolveContextWindowInfo,
 } from "../context-window-guard.js";
+import { DEFAULT_CONTEXT_TOKENS, DEFAULT_MODEL, DEFAULT_PROVIDER } from "../defaults.js";
 import {
   getDelegationTracking,
   resetDelegationTracking,
   shouldForceTopLevelDelegation,
 } from "../delegation-enforcement.js";
-import { DEFAULT_CONTEXT_TOKENS, DEFAULT_MODEL, DEFAULT_PROVIDER } from "../defaults.js";
 import { FailoverError, resolveFailoverStatus } from "../failover-error.js";
 import {
   ensureAuthProfileStore,
@@ -875,8 +875,7 @@ export async function runEmbeddedPiAgent(
             return {
               payloads: [
                 {
-                  text:
-                    "Request failed because the top-level agent did not delegate to a subagent as required. Please try again.",
+                  text: "Request failed because the top-level agent did not delegate to a subagent as required. Please try again.",
                   isError: true,
                 },
               ],
@@ -1429,4 +1428,3 @@ export async function runEmbeddedPiAgent(
     }),
   );
 }
-

@@ -72,7 +72,11 @@ const TAG_OVERRIDES: Record<string, ConfigTag[]> = {
   "agents.defaults.modelRouting.compressionModel": ["models", "performance"],
   "agents.defaults.modelRouting.verificationModel": ["models", "performance"],
   "agents.defaults.modelRouting.escalation.minConfidence": ["models", "performance", "reliability"],
-  "agents.defaults.modelRouting.escalation.maxCheapPasses": ["models", "performance", "reliability"],
+  "agents.defaults.modelRouting.escalation.maxCheapPasses": [
+    "models",
+    "performance",
+    "reliability",
+  ],
   "tools.toolResultCache": ["tools", "performance", "storage"],
   "tools.parallelExecution": ["tools", "performance"],
   "agents.defaults.compaction.pruningStrategy": ["performance", "reliability"],
@@ -81,9 +85,16 @@ const TAG_OVERRIDES: Record<string, ConfigTag[]> = {
   "agents.defaults.subagents.delegation": ["tools", "models", "performance"],
   "agents.defaults.subagents.delegation.enabled": ["tools", "models", "performance"],
   "agents.defaults.subagents.delegation.structuredResults": ["tools", "models", "performance"],
-  "agents.defaults.subagents.delegation.parallelResearch.enabled": ["tools", "performance", "reliability"],
-  "agents.defaults.subagents.delegation.parallelResearch.maxConcurrent":
-    ["tools", "performance", "reliability"],
+  "agents.defaults.subagents.delegation.parallelResearch.enabled": [
+    "tools",
+    "performance",
+    "reliability",
+  ],
+  "agents.defaults.subagents.delegation.parallelResearch.maxConcurrent": [
+    "tools",
+    "performance",
+    "reliability",
+  ],
 };
 
 const PREFIX_RULES: Array<{ prefix: string; tags: ConfigTag[] }> = [
@@ -218,6 +229,3 @@ export function applyDerivedTags(hints: ConfigUiHints): ConfigUiHints {
   }
   return next;
 }
-
-
-

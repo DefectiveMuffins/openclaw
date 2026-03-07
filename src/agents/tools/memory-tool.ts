@@ -76,14 +76,17 @@ function mergeAndRankResults(params: {
   for (const resultSet of params.resultSets) {
     for (const entry of resultSet) {
       const key = makeResultKey(entry);
-      const candidate = { ...entry, score: Math.min(1, entry.score + applySourceBias(entry, params.sourceBias)) };
+      const candidate = {
+        ...entry,
+        score: Math.min(1, entry.score + applySourceBias(entry, params.sourceBias)),
+      };
       const existing = deduped.get(key);
       if (!existing || candidate.score > existing.score) {
         deduped.set(key, candidate);
       }
     }
   }
-  return [...deduped.values()].sort((a, b) => b.score - a.score);
+  return [...deduped.values()].toSorted((a, b) => b.score - a.score);
 }
 
 function resolveConfidenceLevel(score: number): "low" | "medium" | "high" {
@@ -173,7 +176,9 @@ export function createMemorySearchTool(options: {
       const query = readStringParam(params, "query", { required: true });
       const requestedMaxResults = readNumberParam(params, "maxResults");
       const requestedMinScore = readNumberParam(params, "minScore");
-      const requestedStrategy = readStringParam(params, "strategy") as MemorySearchStrategy | undefined;
+      const requestedStrategy = readStringParam(params, "strategy") as
+        | MemorySearchStrategy
+        | undefined;
       const requestedSourceBias = readStringParam(params, "sourceBias") as
         | MemorySearchSourceBias
         | undefined;
@@ -232,10 +237,7 @@ export function createMemorySearchTool(options: {
         packMemorySearchResults({ results: merged, maxResults }),
         includeCitations,
       );
-      const results = clampResultsByInjectedChars(
-        decorated,
-        resolved.qmd?.limits.maxInjectedChars,
-      );
+      const results = clampResultsByInjectedChars(decorated, resolved.qmd?.limits.maxInjectedChars);
       const confidenceScore = estimateMemorySearchConfidence(results);
       const workingSetHits = results.filter((entry) => entry.source === "working-set").length;
 

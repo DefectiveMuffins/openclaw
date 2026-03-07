@@ -292,7 +292,7 @@ describe("gateway server chat", () => {
         JSON.stringify({
           message: {
             role: "assistant",
-            content: [{ type: "text", text: "Hey Dan — I’m here and ready to help." }],
+            content: [{ type: "text", text: "Hey Dan â€” Iâ€™m here and ready to help." }],
             timestamp: Date.now() + 1,
           },
         }),
@@ -311,7 +311,7 @@ describe("gateway server chat", () => {
       expect(JSON.stringify(messages)).not.toContain(BARE_SESSION_RESET_PROMPT);
       expect(messages[0]).toMatchObject({
         role: "assistant",
-        content: [{ type: "text", text: "Hey Dan — I’m here and ready to help." }],
+        content: [{ type: "text", text: "Hey Dan â€” Iâ€™m here and ready to help." }],
       });
     });
   });
@@ -348,21 +348,30 @@ describe("gateway server chat", () => {
         JSON.stringify({
           message: {
             role: "assistant",
-            content: [{ type: "text", text: "Hey! Ready to tackle whatever you've got on your plate." }],
+            content: [
+              { type: "text", text: "Hey! Ready to tackle whatever you've got on your plate." },
+            ],
             timestamp: Date.now() + 3,
           },
         }),
         JSON.stringify({
           message: {
             role: "user",
-            content: [{ type: "text", text: "Do you need any info about me before we get started?" }],
+            content: [
+              { type: "text", text: "Do you need any info about me before we get started?" },
+            ],
             timestamp: Date.now() + 4,
           },
         }),
         JSON.stringify({
           message: {
             role: "assistant",
-            content: [{ type: "text", text: "I have your timezone already, but share any preferences you want me to keep in mind." }],
+            content: [
+              {
+                type: "text",
+                text: "I have your timezone already, but share any preferences you want me to keep in mind.",
+              },
+            ],
             timestamp: Date.now() + 5,
           },
         }),
@@ -374,13 +383,13 @@ describe("gateway server chat", () => {
       expect(messages).toMatchObject([
         {
           role: "assistant",
-          content: [{ type: "text", text: "Hey! Ready to tackle whatever you've got on your plate." }],
+          content: [
+            { type: "text", text: "Hey! Ready to tackle whatever you've got on your plate." },
+          ],
         },
         {
           role: "user",
-          content: [
-            { type: "text", text: "Do you need any info about me before we get started?" },
-          ],
+          content: [{ type: "text", text: "Do you need any info about me before we get started?" }],
         },
         {
           role: "assistant",
@@ -414,21 +423,36 @@ describe("gateway server chat", () => {
         JSON.stringify({
           message: {
             role: "assistant",
-            content: [{ type: "text", text: "Hey there! I'm ready to help you out -- what's on your mind?" }],
+            content: [
+              {
+                type: "text",
+                text: "Hey there! I'm ready to help you out -- what's on your mind?",
+              },
+            ],
             timestamp: Date.now() + 1,
           },
         }),
         JSON.stringify({
           message: {
             role: "assistant",
-            content: [{ type: "text", text: "Hey! I'm your AI assistant -- think of me as your digital companion who's here to actually help without the corporate drone vibes. What are we working on today?" }],
+            content: [
+              {
+                type: "text",
+                text: "Hey! I'm your AI assistant -- think of me as your digital companion who's here to actually help without the corporate drone vibes. What are we working on today?",
+              },
+            ],
             timestamp: Date.now() + 2,
           },
         }),
         JSON.stringify({
           message: {
             role: "assistant",
-            content: [{ type: "text", text: "Hey! I'm your AI assistant -- think of me as your digital companion who's here to actually help without the corporate drone vibes. What are we working on today?" }],
+            content: [
+              {
+                type: "text",
+                text: "Hey! I'm your AI assistant -- think of me as your digital companion who's here to actually help without the corporate drone vibes. What are we working on today?",
+              },
+            ],
             timestamp: Date.now() + 3,
           },
         }),
@@ -593,5 +617,3 @@ describe("gateway server chat", () => {
     });
   });
 });
-
-

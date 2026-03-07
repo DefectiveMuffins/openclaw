@@ -439,4 +439,3 @@ export async function loadCron(host: SettingsHost) {
     await loadCronRuns(cronHost, cronHost.cronRunsJobId);
   }
 }
-

@@ -117,4 +117,3 @@ describe("resolveAdaptiveThinkLevel", () => {
     expect(resolveAdaptiveThinkLevel("debug race condition in scheduler", [])).toBe("high");
   });
 });
-

@@ -188,8 +188,7 @@ export function shouldRunMemoryFlush(params: {
   if (threshold > 0 && totalTokens >= threshold) {
     const compactionCount = params.entry.compactionCount ?? 0;
     const lastFlushAt = params.entry.memoryFlushCompactionCount;
-    nearCompactionTrigger =
-      !(typeof lastFlushAt === "number" && lastFlushAt === compactionCount);
+    nearCompactionTrigger = !(typeof lastFlushAt === "number" && lastFlushAt === compactionCount);
   }
 
   return nearCompactionTrigger || periodicTurnTrigger || periodicTimeTrigger;

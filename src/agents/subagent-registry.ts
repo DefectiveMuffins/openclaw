@@ -1,10 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { loadConfig } from "../config/config.js";
-import type {
-  SubagentDelegationRole,
-  SubagentResponseFormat,
-} from "./subagent-result-contract.js";
 import {
   loadSessionStore,
   resolveAgentIdFromSessionKey,
@@ -49,6 +45,7 @@ import {
   restoreSubagentRunsFromDisk,
 } from "./subagent-registry-state.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
+import type { SubagentDelegationRole, SubagentResponseFormat } from "./subagent-result-contract.js";
 import { resolveAgentTimeoutMs } from "./timeout.js";
 
 export type { SubagentRunRecord } from "./subagent-registry.types.js";

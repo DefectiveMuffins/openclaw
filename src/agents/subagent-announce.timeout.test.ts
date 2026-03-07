@@ -39,22 +39,24 @@ vi.mock("../config/sessions.js", () => ({
   resolveAgentIdFromSessionKey: () => "main",
   resolveStorePath: () => "/tmp/sessions-main.json",
   resolveMainSessionKey: () => "agent:main:main",
-  updateSessionStoreEntry: vi.fn(async (params: {
-    sessionKey: string;
-    update: (entry: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
-  }) => {
-    const existing = sessionStore[params.sessionKey];
-    if (!existing) {
-      return null;
-    }
-    const patch = await params.update(existing);
-    if (!patch) {
-      return existing;
-    }
-    const next = { ...existing, ...patch };
-    sessionStore[params.sessionKey] = next;
-    return next;
-  }),
+  updateSessionStoreEntry: vi.fn(
+    async (params: {
+      sessionKey: string;
+      update: (entry: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
+    }) => {
+      const existing = sessionStore[params.sessionKey];
+      if (!existing) {
+        return null;
+      }
+      const patch = await params.update(existing);
+      if (!patch) {
+        return existing;
+      }
+      const next = { ...existing, ...patch };
+      sessionStore[params.sessionKey] = next;
+      return next;
+    },
+  ),
 }));
 
 vi.mock("./subagent-depth.js", () => ({

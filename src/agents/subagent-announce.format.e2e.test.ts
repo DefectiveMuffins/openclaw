@@ -125,19 +125,24 @@ vi.mock("../config/sessions.js", () => ({
   resolveMainSessionKey: () => "agent:main:main",
   readSessionUpdatedAt: vi.fn(() => undefined),
   recordSessionMetaFromInbound: vi.fn().mockResolvedValue(undefined),
-  updateSessionStoreEntry: vi.fn(async (params: {
-    sessionKey: string;
-    update: (entry: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
-  }) => {
-    const existing = sessionStore[params.sessionKey] ?? { sessionId: params.sessionKey, updatedAt: 0 };
-    const patch = await params.update(existing);
-    if (!patch) {
-      return existing;
-    }
-    const next = { ...existing, ...patch };
-    sessionStore[params.sessionKey] = next;
-    return next;
-  }),
+  updateSessionStoreEntry: vi.fn(
+    async (params: {
+      sessionKey: string;
+      update: (entry: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
+    }) => {
+      const existing = sessionStore[params.sessionKey] ?? {
+        sessionId: params.sessionKey,
+        updatedAt: 0,
+      };
+      const patch = await params.update(existing);
+      if (!patch) {
+        return existing;
+      }
+      const next = { ...existing, ...patch };
+      sessionStore[params.sessionKey] = next;
+      return next;
+    },
+  ),
 }));
 
 vi.mock("./pi-embedded.js", () => embeddedRunMock);

@@ -267,12 +267,13 @@ function mergeConfig(
       DEFAULT_ROUTING_DEEP_QUERY_THRESHOLD,
   };
   const workingSet = {
-    enabled: overrides?.workingSet?.enabled ?? defaults?.workingSet?.enabled ?? DEFAULT_WORKING_SET_ENABLED,
-    sources: [
-      ...(defaults?.workingSet?.sources ?? []),
-      ...(overrides?.workingSet?.sources ?? []),
-    ],
-    ttlMs: overrides?.workingSet?.ttlMs ?? defaults?.workingSet?.ttlMs ?? DEFAULT_WORKING_SET_TTL_MS,
+    enabled:
+      overrides?.workingSet?.enabled ??
+      defaults?.workingSet?.enabled ??
+      DEFAULT_WORKING_SET_ENABLED,
+    sources: [...(defaults?.workingSet?.sources ?? []), ...(overrides?.workingSet?.sources ?? [])],
+    ttlMs:
+      overrides?.workingSet?.ttlMs ?? defaults?.workingSet?.ttlMs ?? DEFAULT_WORKING_SET_TTL_MS,
     maxEntries:
       overrides?.workingSet?.maxEntries ??
       defaults?.workingSet?.maxEntries ??

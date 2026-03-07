@@ -31,7 +31,6 @@ describe("pi-tools.policy", () => {
   });
 });
 
-
 describe("resolveEffectiveToolPolicy default orchestrator", () => {
   it("defaults top-level requester sessions to the orchestrator profile", () => {
     const resolved = resolveEffectiveToolPolicy({
@@ -211,4 +210,3 @@ describe("resolveSubagentToolPolicy depth awareness", () => {
     expect(isToolAllowedByPolicyName("sessions_spawn", policy)).toBe(false);
   });
 });
-

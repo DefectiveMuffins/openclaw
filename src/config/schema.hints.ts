@@ -1,81 +1,13 @@
 import { z } from "zod";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import type { ConfigUiHints } from "../shared/config-ui-hints-types.js";
-import { FIELD_HELP } from "./schema.help.js";
-import { FIELD_LABELS } from "./schema.labels.js";
+import { buildConfigMetadataHints } from "./schema.metadata.js";
 import { applyDerivedTags } from "./schema.tags.js";
 import { sensitive } from "./zod-schema.sensitive.js";
 
 const log = createSubsystemLogger("config/schema");
 
 export type { ConfigUiHint, ConfigUiHints } from "../shared/config-ui-hints-types.js";
-
-const GROUP_LABELS: Record<string, string> = {
-  wizard: "Wizard",
-  update: "Update",
-  diagnostics: "Diagnostics",
-  logging: "Logging",
-  gateway: "Gateway",
-  nodeHost: "Node Host",
-  agents: "Agents",
-  tools: "Tools",
-  bindings: "Bindings",
-  audio: "Audio",
-  models: "Models",
-  messages: "Messages",
-  commands: "Commands",
-  session: "Session",
-  cron: "Cron",
-  hooks: "Hooks",
-  ui: "UI",
-  browser: "Browser",
-  talk: "Talk",
-  channels: "Messaging Channels",
-  skills: "Skills",
-  plugins: "Plugins",
-  discovery: "Discovery",
-  presence: "Presence",
-  voicewake: "Voice Wake",
-};
-
-const GROUP_ORDER: Record<string, number> = {
-  wizard: 20,
-  update: 25,
-  diagnostics: 27,
-  gateway: 30,
-  nodeHost: 35,
-  agents: 40,
-  tools: 50,
-  bindings: 55,
-  audio: 60,
-  models: 70,
-  messages: 80,
-  commands: 85,
-  session: 90,
-  cron: 100,
-  hooks: 110,
-  ui: 120,
-  browser: 130,
-  talk: 140,
-  channels: 150,
-  skills: 200,
-  plugins: 205,
-  discovery: 210,
-  presence: 220,
-  voicewake: 230,
-  logging: 900,
-};
-
-const FIELD_PLACEHOLDERS: Record<string, string> = {
-  "gateway.remote.url": "ws://host:18789",
-  "gateway.remote.tlsFingerprint": "sha256:ab12cd34…",
-  "gateway.remote.sshTarget": "user@host",
-  "gateway.controlUi.basePath": "/openclaw",
-  "gateway.controlUi.root": "dist/control-ui",
-  "gateway.controlUi.allowedOrigins": "https://control.example.com",
-  "channels.mattermost.baseUrl": "https://chat.example.com",
-  "agents.list[].identity.avatar": "avatars/openclaw.png",
-};
 
 /**
  * Non-sensitive field names that happen to match sensitive patterns.
@@ -120,27 +52,23 @@ export function isSensitiveConfigPath(path: string): boolean {
 }
 
 export function buildBaseHints(): ConfigUiHints {
-  const hints: ConfigUiHints = {};
-  for (const [group, label] of Object.entries(GROUP_LABELS)) {
-    hints[group] = {
-      label,
-      group: label,
-      order: GROUP_ORDER[group],
-    };
-  }
-  for (const [path, label] of Object.entries(FIELD_LABELS)) {
-    const current = hints[path];
-    hints[path] = current ? { ...current, label } : { label };
-  }
-  for (const [path, help] of Object.entries(FIELD_HELP)) {
-    const current = hints[path];
-    hints[path] = current ? { ...current, help } : { help };
-  }
-  for (const [path, placeholder] of Object.entries(FIELD_PLACEHOLDERS)) {
-    const current = hints[path];
-    hints[path] = current ? { ...current, placeholder } : { placeholder };
-  }
-  return applyDerivedTags(hints);
+  return applyDerivedTags(buildConfigMetadataHints());
+}
+
+// Seems to be the only way tsgo accepts us to check if we have a ZodClass
+// with an unwrap() method. And it's overly complex because oxlint and
+// tsgo are each forbidding what the other allows.
+interface ZodDummy {
+  unwrap: () => z.ZodType;
+}
+function isUnwrappable(object: unknown): object is ZodDummy {
+  return (
+    !!object &&
+    typeof object === "object" &&
+    "unwrap" in object &&
+    typeof (object as Record<string, unknown>).unwrap === "function" &&
+    !(object instanceof z.ZodArray)
+  );
 }
 
 export function applySensitiveHints(
@@ -160,22 +88,6 @@ export function applySensitiveHints(
     }
   }
   return next;
-}
-
-// Seems to be the only way tsgo accepts us to check if we have a ZodClass
-// with an unwrap() method. And it's overly complex because oxlint and
-// tsgo are each forbidding what the other allows.
-interface ZodDummy {
-  unwrap: () => z.ZodType;
-}
-function isUnwrappable(object: unknown): object is ZodDummy {
-  return (
-    !!object &&
-    typeof object === "object" &&
-    "unwrap" in object &&
-    typeof (object as Record<string, unknown>).unwrap === "function" &&
-    !(object instanceof z.ZodArray)
-  );
 }
 
 export function mapSensitivePaths(

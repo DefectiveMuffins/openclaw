@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
-import { createToolFsPolicy, resolveEffectiveToolFsWorkspaceOnly, resolveToolFsConfig } from "./tool-fs-policy.js";
+import {
+  createToolFsPolicy,
+  resolveEffectiveToolFsWorkspaceOnly,
+  resolveToolFsConfig,
+} from "./tool-fs-policy.js";
 
 describe("resolveEffectiveToolFsWorkspaceOnly", () => {
   it("returns false by default when tools.fs.workspaceOnly is unset", () => {

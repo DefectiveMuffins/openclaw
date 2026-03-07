@@ -57,7 +57,7 @@ describe("resolveSkillsPromptForRun", () => {
       workspaceDir: "/tmp/openclaw",
     });
     expect(prompt).toContain("<available_skills>");
-    expect(prompt).toContain("<skill name=\"demo-skill\"");
-    expect(prompt).toContain("location=\"/app/skills/demo-skill/SKILL.md\"");
+    expect(prompt).toContain('<skill name="demo-skill"');
+    expect(prompt).toContain('location="/app/skills/demo-skill/SKILL.md"');
   });
 });

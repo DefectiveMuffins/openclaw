@@ -171,7 +171,9 @@ export function resolveMemorySearchPlan(params: {
       ? buildDeepQueries(params.query, routing.maxQueries)
       : uniqueQueries([params.query.trim()]).slice(0, 1);
   const maxResults =
-    strategy === "deep" ? Math.max(params.maxResults, Math.min(10, params.maxResults + 2)) : params.maxResults;
+    strategy === "deep"
+      ? Math.max(params.maxResults, Math.min(10, params.maxResults + 2))
+      : params.maxResults;
   const minScore = strategy === "deep" ? Math.max(0, params.minScore - 0.05) : params.minScore;
   return {
     intent,
@@ -180,7 +182,8 @@ export function resolveMemorySearchPlan(params: {
     queries,
     maxResults,
     minScore,
-    workingSetFirst: params.hasWorkingSet && (sourceBias === "working-set" || intent === "code-context"),
+    workingSetFirst:
+      params.hasWorkingSet && (sourceBias === "working-set" || intent === "code-context"),
   };
 }
 
@@ -192,7 +195,7 @@ function mergeAdjacentResults(results: MemorySearchResult[]): MemorySearchResult
   if (results.length <= 1) {
     return results;
   }
-  const sorted = [...results].sort((a, b) => {
+  const sorted = results.toSorted((a, b) => {
     if (a.source !== b.source) {
       return a.source.localeCompare(b.source);
     }
@@ -246,7 +249,7 @@ export function packMemorySearchResults(params: {
   const maxSnippetChars = params.maxSnippetChars ?? 1200;
   const perPathCounts = new Map<string, number>();
   const packed = merged
-    .sort((a, b) => b.score - a.score)
+    .toSorted((a, b) => b.score - a.score)
     .filter((result) => {
       const key = `${result.source}:${result.path}`;
       const count = perPathCounts.get(key) ?? 0;
@@ -273,6 +276,9 @@ export function estimateMemorySearchConfidence(results: MemorySearchResult[]): n
   }
   const top = Math.max(0, Math.min(1, results[0]?.score ?? 0));
   const support = Math.min(1, results.length / 4);
-  const diversity = Math.min(1, new Set(results.map((result) => `${result.source}:${result.path}`)).size / 3);
+  const diversity = Math.min(
+    1,
+    new Set(results.map((result) => `${result.source}:${result.path}`)).size / 3,
+  );
   return Math.max(0, Math.min(1, top * 0.65 + support * 0.2 + diversity * 0.15));
 }

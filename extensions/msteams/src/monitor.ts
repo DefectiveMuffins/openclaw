@@ -1,5 +1,5 @@
 import type { Server } from "node:http";
-import type { Request, Response } from "express";
+import type { ErrorRequestHandler, Request, RequestHandler, Response } from "express";
 import {
   DEFAULT_WEBHOOK_MAX_BODY_BYTES,
   keepHttpServerTaskAlive,
@@ -270,14 +270,28 @@ export async function monitorMSTeamsProvider(
   // Create Express server
   const expressApp = express.default();
   expressApp.use(express.json({ limit: MSTEAMS_WEBHOOK_MAX_BODY_BYTES }));
-  expressApp.use((err: unknown, _req: Request, res: Response, next: (err?: unknown) => void) => {
+  const payloadTooLargeHandler: ErrorRequestHandler = (
+    err: unknown,
+    _req: Request,
+    res: Response,
+    next,
+  ) => {
     if (err && typeof err === "object" && "status" in err && err.status === 413) {
       res.status(413).json({ error: "Payload too large" });
       return;
     }
     next(err);
-  });
-  expressApp.use(authorizeJWT(authConfig));
+  };
+  expressApp.use(payloadTooLargeHandler);
+  const jwtAuthorizer = authorizeJWT(authConfig);
+  const authMiddleware: RequestHandler = (req, res, next) => {
+    void jwtAuthorizer(
+      req as Parameters<typeof jwtAuthorizer>[0],
+      res as unknown as Parameters<typeof jwtAuthorizer>[1],
+      next,
+    ).catch(next);
+  };
+  expressApp.use(authMiddleware);
 
   // Set up the messages endpoint - use configured path and /api/messages as fallback
   const configuredPath = msteamsCfg.webhook?.path ?? "/api/messages";

@@ -351,8 +351,7 @@ export const FIELD_LABELS: Record<string, string> = {
   "agents.defaults.memorySearch.workingSet.enabled": "Memory Search Working Set Enabled",
   "agents.defaults.memorySearch.workingSet.sources": "Memory Search Working Set Sources",
   "agents.defaults.memorySearch.workingSet.ttlMs": "Memory Search Working Set TTL (ms)",
-  "agents.defaults.memorySearch.workingSet.maxEntries":
-    "Memory Search Working Set Max Entries",
+  "agents.defaults.memorySearch.workingSet.maxEntries": "Memory Search Working Set Max Entries",
   "agents.defaults.modelRouting": "Stage-aware Model Routing",
   "agents.defaults.modelRouting.enabled": "Stage-aware Model Routing Enabled",
   "agents.defaults.modelRouting.plannerModel": "Planner Model",
@@ -476,8 +475,7 @@ export const FIELD_LABELS: Record<string, string> = {
   "agents.defaults.subagents.simpleTaskModel": "Subagent Simple Task Model",
   "agents.defaults.subagents.delegation": "Subagent Delegation",
   "agents.defaults.subagents.delegation.enabled": "Subagent Delegation Enabled",
-  "agents.defaults.subagents.delegation.structuredResults":
-    "Subagent Structured Results",
+  "agents.defaults.subagents.delegation.structuredResults": "Subagent Structured Results",
   "agents.defaults.subagents.delegation.parallelResearch.enabled":
     "Subagent Parallel Research Enabled",
   "agents.defaults.subagents.delegation.parallelResearch.maxConcurrent":
@@ -842,7 +840,3 @@ export const FIELD_LABELS: Record<string, string> = {
   "plugins.installs.*.resolvedAt": "Plugin Resolution Time",
   "plugins.installs.*.installedAt": "Plugin Install Time",
 };
-
-
-
-

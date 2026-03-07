@@ -576,4 +576,3 @@ describe("tool-loop-detection", () => {
     });
   });
 });
-

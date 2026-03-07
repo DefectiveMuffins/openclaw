@@ -1,7 +1,5 @@
-import path from "node:path";
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { getActiveEmbeddedRunCount } from "../agents/pi-embedded-runner/runs.js";
-import { registerSkillsChangeListener } from "../agents/skills/refresh.js";
 import { initSubagentRegistry } from "../agents/subagent-registry.js";
 import { getTotalPendingReplies } from "../auto-reply/reply/dispatcher-registry.js";
 import type { CanvasHostServer } from "../canvas-host/server.js";
@@ -21,24 +19,13 @@ import {
 import { applyPluginAutoEnable } from "../config/plugin-auto-enable.js";
 import { resolveMainSessionKey } from "../config/sessions.js";
 import { clearAgentRunContext, onAgentEvent } from "../infra/agent-events.js";
-import {
-  ensureControlUiAssetsBuilt,
-  resolveControlUiRootOverrideSync,
-  resolveControlUiRootSync,
-} from "../infra/control-ui-assets.js";
 import { isDiagnosticsEnabled } from "../infra/diagnostic-events.js";
 import { logAcceptedEnvOption } from "../infra/env.js";
 import { createExecApprovalForwarder } from "../infra/exec-approval-forwarder.js";
 import { onHeartbeatEvent } from "../infra/heartbeat-events.js";
 import { startHeartbeatRunner, type HeartbeatRunner } from "../infra/heartbeat-runner.js";
-import { getMachineDisplayName } from "../infra/machine-name.js";
 import { ensureOpenClawCliOnPath } from "../infra/path-env.js";
 import { setGatewaySigusr1RestartPolicy, setPreRestartDeferralCheck } from "../infra/restart.js";
-import {
-  primeRemoteSkillsCache,
-  refreshRemoteBinsForConnectedNodes,
-  setSkillsRemoteRegistry,
-} from "../infra/skills-remote.js";
 import { enqueueSystemEvent } from "../infra/system-events.js";
 import { scheduleGatewayUpdateCheck } from "../infra/update-startup.js";
 import { startDiagnosticHeartbeat, stopDiagnosticHeartbeat } from "../logging/diagnostic.js";
@@ -52,13 +39,11 @@ import {
   activateSecretsRuntimeSnapshot,
   clearSecretsRuntimeSnapshot,
   getActiveSecretsRuntimeSnapshot,
-  prepareSecretsRuntimeSnapshot,
 } from "../secrets/runtime.js";
 import { runOnboardingWizard } from "../wizard/onboarding.js";
 import { createAuthRateLimiter, type AuthRateLimiter } from "./auth-rate-limit.js";
 import { startChannelHealthMonitor } from "./channel-health-monitor.js";
 import { startGatewayConfigReloader } from "./config-reload.js";
-import type { ControlUiRootState } from "./control-ui.js";
 import {
   GATEWAY_EVENT_UPDATE_AVAILABLE,
   type GatewayUpdateAvailableEventPayload,
@@ -69,8 +54,10 @@ import type { startBrowserControlServerIfEnabled } from "./server-browser.js";
 import { createChannelManager } from "./server-channels.js";
 import { createAgentEventHandler } from "./server-chat.js";
 import { createGatewayCloseHandler } from "./server-close.js";
+import { resolveGatewayControlUiRootState } from "./server-control-ui-root.js";
 import { buildGatewayCronService } from "./server-cron.js";
-import { startGatewayDiscovery } from "./server-discovery-runtime.js";
+import { recoverGatewayPendingDeliveriesOnStartup } from "./server-delivery-recovery.js";
+import { startGatewayDiscoveryRegistrar } from "./server-discovery-registrar.js";
 import { applyGatewayLaneConcurrency } from "./server-lanes.js";
 import { startGatewayMaintenanceTimers } from "./server-maintenance.js";
 import { GATEWAY_EVENTS, listGatewayMethods } from "./server-methods-list.js";
@@ -83,8 +70,10 @@ import { loadGatewayModelCatalog } from "./server-model-catalog.js";
 import { createNodeSubscriptionManager } from "./server-node-subscriptions.js";
 import { loadGatewayPlugins } from "./server-plugins.js";
 import { createGatewayReloadHandlers } from "./server-reload-handlers.js";
+import { startGatewayRemoteSkillsSync } from "./server-remote-skills.js";
 import { resolveGatewayRuntimeConfig } from "./server-runtime-config.js";
 import { createGatewayRuntimeState } from "./server-runtime-state.js";
+import { createGatewaySecretsActivator } from "./server-secrets-runtime.js";
 import { resolveSessionKeyForRun } from "./server-session-key.js";
 import { logGatewayStartup } from "./server-startup-log.js";
 import { startGatewaySidecars } from "./server-startup.js";
@@ -260,7 +249,6 @@ export async function startGatewayServer(
     }
   }
 
-  let secretsDegraded = false;
   const emitSecretsStateEvent = (
     code: "SECRETS_RELOADER_DEGRADED" | "SECRETS_RELOADER_RECOVERED",
     message: string,
@@ -271,60 +259,10 @@ export async function startGatewayServer(
       contextKey: code,
     });
   };
-  let secretsActivationTail: Promise<void> = Promise.resolve();
-  const runWithSecretsActivationLock = async <T>(operation: () => Promise<T>): Promise<T> => {
-    const run = secretsActivationTail.then(operation, operation);
-    secretsActivationTail = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return await run;
-  };
-  const activateRuntimeSecrets = async (
-    config: OpenClawConfig,
-    params: { reason: "startup" | "reload" | "restart-check"; activate: boolean },
-  ) =>
-    await runWithSecretsActivationLock(async () => {
-      try {
-        const prepared = await prepareSecretsRuntimeSnapshot({ config });
-        if (params.activate) {
-          activateSecretsRuntimeSnapshot(prepared);
-        }
-        for (const warning of prepared.warnings) {
-          logSecrets.warn(`[${warning.code}] ${warning.message}`);
-        }
-        if (secretsDegraded) {
-          const recoveredMessage =
-            "Secret resolution recovered; runtime remained on last-known-good during the outage.";
-          logSecrets.info(`[SECRETS_RELOADER_RECOVERED] ${recoveredMessage}`);
-          emitSecretsStateEvent("SECRETS_RELOADER_RECOVERED", recoveredMessage, prepared.config);
-        }
-        secretsDegraded = false;
-        return prepared;
-      } catch (err) {
-        const details = String(err);
-        if (!secretsDegraded) {
-          logSecrets.error(`[SECRETS_RELOADER_DEGRADED] ${details}`);
-          if (params.reason !== "startup") {
-            emitSecretsStateEvent(
-              "SECRETS_RELOADER_DEGRADED",
-              `Secret resolution failed; runtime remains on last-known-good snapshot. ${details}`,
-              config,
-            );
-          }
-        } else {
-          logSecrets.warn(`[SECRETS_RELOADER_DEGRADED] ${details}`);
-        }
-        secretsDegraded = true;
-        if (params.reason === "startup") {
-          throw new Error(`Startup failed: required secrets are unavailable. ${details}`, {
-            cause: err,
-          });
-        }
-        throw err;
-      }
-    });
-
+  const { activateRuntimeSecrets } = createGatewaySecretsActivator({
+    logSecrets,
+    emitStateEvent: emitSecretsStateEvent,
+  });
   // Fail fast before startup if required refs are unresolved.
   let cfgAtStart: OpenClawConfig;
   {
@@ -441,38 +379,15 @@ export async function startGatewayServer(
   const { rateLimiter: authRateLimiter, browserRateLimiter: browserAuthRateLimiter } =
     createGatewayAuthRateLimiters(rateLimitConfig);
 
-  let controlUiRootState: ControlUiRootState | undefined;
-  if (controlUiRootOverride) {
-    const resolvedOverride = resolveControlUiRootOverrideSync(controlUiRootOverride);
-    const resolvedOverridePath = path.resolve(controlUiRootOverride);
-    controlUiRootState = resolvedOverride
-      ? { kind: "resolved", path: resolvedOverride }
-      : { kind: "invalid", path: resolvedOverridePath };
-    if (!resolvedOverride) {
-      log.warn(`gateway: controlUi.root not found at ${resolvedOverridePath}`);
-    }
-  } else if (controlUiEnabled) {
-    let resolvedRoot = resolveControlUiRootSync({
-      moduleUrl: import.meta.url,
-      argv1: process.argv[1],
-      cwd: process.cwd(),
-    });
-    if (!resolvedRoot) {
-      const ensureResult = await ensureControlUiAssetsBuilt(gatewayRuntime);
-      if (!ensureResult.ok && ensureResult.message) {
-        log.warn(`gateway: ${ensureResult.message}`);
-      }
-      resolvedRoot = resolveControlUiRootSync({
-        moduleUrl: import.meta.url,
-        argv1: process.argv[1],
-        cwd: process.cwd(),
-      });
-    }
-    controlUiRootState = resolvedRoot
-      ? { kind: "resolved", path: resolvedRoot }
-      : { kind: "missing" };
-  }
-
+  const controlUiRootState = await resolveGatewayControlUiRootState({
+    controlUiRootOverride,
+    controlUiEnabled,
+    runtime: gatewayRuntime,
+    log,
+    moduleUrl: import.meta.url,
+    argv1: process.argv[1],
+    cwd: process.cwd(),
+  });
   const wizardRunner = opts.wizardRunner ?? runOnboardingWizard;
   const { wizardSessions, findRunningWizard, purgeWizardSession } = createWizardSessionTracker();
 
@@ -561,47 +476,22 @@ export async function startGatewayServer(
   const { getRuntimeSnapshot, startChannels, startChannel, stopChannel, markChannelLoggedOut } =
     channelManager;
 
-  if (!minimalTestGateway) {
-    const machineDisplayName = await getMachineDisplayName();
-    const discovery = await startGatewayDiscovery({
-      machineDisplayName,
-      port,
-      gatewayTls: gatewayTls.enabled
-        ? { enabled: true, fingerprintSha256: gatewayTls.fingerprintSha256 }
-        : undefined,
-      wideAreaDiscoveryEnabled: cfgAtStart.discovery?.wideArea?.enabled === true,
-      wideAreaDiscoveryDomain: cfgAtStart.discovery?.wideArea?.domain,
-      tailscaleMode,
-      mdnsMode: cfgAtStart.discovery?.mdns?.mode,
-      logDiscovery,
-    });
-    bonjourStop = discovery.bonjourStop;
-  }
+  bonjourStop = await startGatewayDiscoveryRegistrar({
+    enabled: !minimalTestGateway,
+    cfg: cfgAtStart,
+    port,
+    gatewayTls: gatewayTls.enabled
+      ? { enabled: true, fingerprintSha256: gatewayTls.fingerprintSha256 }
+      : undefined,
+    tailscaleMode,
+    logDiscovery,
+  });
 
-  if (!minimalTestGateway) {
-    setSkillsRemoteRegistry(nodeRegistry);
-    void primeRemoteSkillsCache();
-  }
-  // Debounce skills-triggered node probes to avoid feedback loops and rapid-fire invokes.
-  // Skills changes can happen in bursts (e.g., file watcher events), and each probe
-  // takes time to complete. A 30-second delay ensures we batch changes together.
-  let skillsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-  const skillsRefreshDelayMs = 30_000;
-  const skillsChangeUnsub = minimalTestGateway
-    ? () => {}
-    : registerSkillsChangeListener((event) => {
-        if (event.reason === "remote-node") {
-          return;
-        }
-        if (skillsRefreshTimer) {
-          clearTimeout(skillsRefreshTimer);
-        }
-        skillsRefreshTimer = setTimeout(() => {
-          skillsRefreshTimer = null;
-          const latest = loadConfig();
-          void refreshRemoteBinsForConnectedNodes(latest);
-        }, skillsRefreshDelayMs);
-      });
+  const remoteSkillsSync = startGatewayRemoteSkillsSync({
+    enabled: !minimalTestGateway,
+    nodeRegistry,
+    loadConfig,
+  });
 
   const noopInterval = () => setInterval(() => {}, 1 << 30);
   let tickInterval = noopInterval();
@@ -667,19 +557,11 @@ export async function startGatewayServer(
     void cron.start().catch((err) => logCron.error(`failed to start: ${String(err)}`));
   }
 
-  // Recover pending outbound deliveries from previous crash/restart.
-  if (!minimalTestGateway) {
-    void (async () => {
-      const { recoverPendingDeliveries } = await import("../infra/outbound/delivery-queue.js");
-      const { deliverOutboundPayloads } = await import("../infra/outbound/deliver.js");
-      const logRecovery = log.child("delivery-recovery");
-      await recoverPendingDeliveries({
-        deliver: deliverOutboundPayloads,
-        log: logRecovery,
-        cfg: cfgAtStart,
-      });
-    })().catch((err) => log.error(`Delivery recovery failed: ${String(err)}`));
-  }
+  recoverGatewayPendingDeliveriesOnStartup({
+    enabled: !minimalTestGateway,
+    cfg: cfgAtStart,
+    log,
+  });
 
   const execApprovalManager = new ExecApprovalManager();
   const execApprovalForwarder = createExecApprovalForwarder();
@@ -933,11 +815,7 @@ export async function startGatewayServer(
       if (diagnosticsEnabled) {
         stopDiagnosticHeartbeat();
       }
-      if (skillsRefreshTimer) {
-        clearTimeout(skillsRefreshTimer);
-        skillsRefreshTimer = null;
-      }
-      skillsChangeUnsub();
+      remoteSkillsSync.stop();
       authRateLimiter?.dispose();
       browserAuthRateLimiter.dispose();
       channelHealthMonitor?.stop();

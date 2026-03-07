@@ -1672,4 +1672,3 @@ export async function runEmbeddedAttempt(
     process.chdir(prevCwd);
   }
 }
-

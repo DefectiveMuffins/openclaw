@@ -72,11 +72,14 @@ describe("sessions_spawn delegation contracts", () => {
       },
     });
     expect(agentParams?.thinking).toBe("low");
-    expect(String(agentParams?.extraSystemPrompt ?? "")).toContain("## Delegation Contract");
-    expect(String(agentParams?.extraSystemPrompt ?? "")).toContain("Role: research");
-    expect(String(agentParams?.extraSystemPrompt ?? "")).toContain(
-      "Return the regression cause and touched files",
-    );
+    const extraSystemPrompt = agentParams?.extraSystemPrompt;
+    expect(typeof extraSystemPrompt).toBe("string");
+    if (typeof extraSystemPrompt !== "string") {
+      throw new TypeError("expected string extraSystemPrompt");
+    }
+    expect(extraSystemPrompt).toContain("## Delegation Contract");
+    expect(extraSystemPrompt).toContain("Role: research");
+    expect(extraSystemPrompt).toContain("Return the regression cause and touched files");
     const modelPatch = calls.find(
       (call) => call.method === "sessions.patch" && (call.params as { model?: string })?.model,
     );

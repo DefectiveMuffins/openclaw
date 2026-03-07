@@ -49,9 +49,7 @@ export const DESTRUCTIVE_COMMAND_PATTERNS: readonly DestructivePattern[] = [
   },
 ] as const;
 
-export function isDestructiveCommand(
-  command: string,
-): { destructive: boolean; pattern?: string } {
+export function isDestructiveCommand(command: string): { destructive: boolean; pattern?: string } {
   const raw = command.trim();
   if (!raw) {
     return { destructive: false };

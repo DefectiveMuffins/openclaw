@@ -18,12 +18,12 @@ import { AGENT_LANE_SUBAGENT } from "./lanes.js";
 import { resolveSubagentSpawnModelSelection } from "./model-selection.js";
 import { resolveSandboxRuntimeStatus } from "./sandbox/runtime-status.js";
 import { buildSubagentSystemPrompt } from "./subagent-announce.js";
+import { getSubagentDepthFromSessionStore } from "./subagent-depth.js";
+import { countActiveRunsForSession, registerSubagentRun } from "./subagent-registry.js";
 import {
   type SubagentDelegationRole,
   type SubagentResponseFormat,
 } from "./subagent-result-contract.js";
-import { getSubagentDepthFromSessionStore } from "./subagent-depth.js";
-import { countActiveRunsForSession, registerSubagentRun } from "./subagent-registry.js";
 import { readStringParam } from "./tools/common.js";
 import {
   resolveDisplaySessionKey,
@@ -418,7 +418,7 @@ export async function spawnSubagentDirect(
   const acceptance = (params.acceptance ?? []).map((entry) => entry.trim()).filter(Boolean);
   const responseFormat =
     params.responseFormat ??
-    (delegationEnabled && structuredResultsDefault !== false ? "structured" : "text");
+    (delegationEnabled && structuredResultsDefault ? "structured" : "text");
   const roleTimeoutSeconds =
     role === "summarize" ? 120 : role === "verify" ? 180 : readOnly ? 240 : undefined;
   if (params.runTimeoutSeconds == null && roleTimeoutSeconds !== undefined) {
@@ -947,4 +947,3 @@ export async function spawnSubagentDirect(
     attachments: attachmentsReceipt,
   };
 }
-

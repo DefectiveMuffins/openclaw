@@ -316,7 +316,9 @@ function collectToolPayloadsFromMessage(message: Record<string, unknown>): Array
     if (!TOOL_RESULT_BLOCK_TYPES.has(type)) {
       continue;
     }
-    const payload = maybeParseJsonPayload(extractStructuredText(block.content ?? block.text).join("\n"));
+    const payload = maybeParseJsonPayload(
+      extractStructuredText(block.content ?? block.text).join("\n"),
+    );
     if (payload === undefined) {
       continue;
     }
@@ -377,16 +379,14 @@ function updateDelegationSummary(
   accumulator: SessionAgenticAccumulator,
   payload: Record<string, unknown>,
 ): void {
-  const summary =
-    accumulator.delegation ??
-    {
-      spawnCalls: 0,
-      accepted: 0,
-      structuredResponses: 0,
-      readOnlySpawns: 0,
-      roleCounts: new Map<string, number>(),
-      modelsApplied: new Set<string>(),
-    };
+  const summary = accumulator.delegation ?? {
+    spawnCalls: 0,
+    accepted: 0,
+    structuredResponses: 0,
+    readOnlySpawns: 0,
+    roleCounts: new Map<string, number>(),
+    modelsApplied: new Set<string>(),
+  };
   summary.spawnCalls += 1;
   if (normalizeStringValue(payload.status) === "accepted") {
     summary.accepted += 1;

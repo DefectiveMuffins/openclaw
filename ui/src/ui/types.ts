@@ -633,4 +633,3 @@ export type LogEntry = {
   message?: string | null;
   meta?: Record<string, unknown> | null;
 };
-

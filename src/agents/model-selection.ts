@@ -1,6 +1,6 @@
 import type { OpenClawConfig } from "../config/config.js";
-import type { AgentModelRoutingPhase } from "../config/types.agent-defaults.js";
 import { resolveAgentModelPrimaryValue, toAgentModelListLike } from "../config/model-input.js";
+import type { AgentModelRoutingPhase } from "../config/types.agent-defaults.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { resolveAgentConfig, resolveAgentEffectiveModelPrimary } from "./agent-scope.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "./defaults.js";
@@ -748,4 +748,3 @@ export function normalizeModelSelection(value: unknown): string | undefined {
   }
   return undefined;
 }
-

@@ -36,6 +36,11 @@ export type ConfigState = {
   lastError: string | null;
 };
 
+export type ConfigFormState = Pick<
+  ConfigState,
+  "configSnapshot" | "configForm" | "configFormDirty" | "configFormMode" | "configRaw"
+>;
+
 export async function loadConfig(state: ConfigState) {
   if (!state.client || !state.connected) {
     return;
@@ -195,7 +200,7 @@ export async function runUpdate(state: ConfigState) {
 }
 
 export function updateConfigFormValue(
-  state: ConfigState,
+  state: ConfigFormState,
   path: Array<string | number>,
   value: unknown,
 ) {
@@ -208,7 +213,7 @@ export function updateConfigFormValue(
   }
 }
 
-export function removeConfigFormValue(state: ConfigState, path: Array<string | number>) {
+export function removeConfigFormValue(state: ConfigFormState, path: Array<string | number>) {
   const base = cloneConfigObject(state.configForm ?? state.configSnapshot?.config ?? {});
   removePathValue(base, path);
   state.configForm = base;

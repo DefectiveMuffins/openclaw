@@ -9,7 +9,9 @@ import {
 
 describe("memory-search-routing", () => {
   it("classifies code-context queries and prefers working-set when available", () => {
-    const intent = classifyMemorySearchIntent("Check src/agents/tool-working-set.ts around line 20");
+    const intent = classifyMemorySearchIntent(
+      "Check src/agents/tool-working-set.ts around line 20",
+    );
     expect(intent).toBe("code-context");
 
     const plan = resolveMemorySearchPlan({
@@ -31,7 +33,8 @@ describe("memory-search-routing", () => {
 
   it("uses deep multi-query recall for decision-style questions", () => {
     const plan = resolveMemorySearchPlan({
-      query: "Why did we decide to keep compaction relevance pruning instead of recency-only pruning?",
+      query:
+        "Why did we decide to keep compaction relevance pruning instead of recency-only pruning?",
       maxResults: 5,
       minScore: 0.4,
       routing: {

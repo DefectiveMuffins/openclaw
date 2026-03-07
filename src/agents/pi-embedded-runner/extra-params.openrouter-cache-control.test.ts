@@ -30,6 +30,14 @@ function runOpenRouterPayload(payload: StreamPayload, modelId: string) {
   void agent.streamFn?.(model, context, {});
 }
 
+function expectContentBlocks(content: unknown): unknown[] {
+  expect(Array.isArray(content)).toBe(true);
+  if (!Array.isArray(content)) {
+    throw new TypeError("Expected array system content blocks");
+  }
+  return content;
+}
+
 describe("extra-params: OpenRouter Anthropic cache_control", () => {
   it("injects cache_control into system message for OpenRouter Anthropic models", () => {
     const payload = {
@@ -60,7 +68,7 @@ describe("extra-params: OpenRouter Anthropic cache_control", () => {
 
     runOpenRouterPayload(payload, "anthropic/claude-opus-4-6");
 
-    const content = payload.messages[0].content as Array<Record<string, unknown>>;
+    const content = expectContentBlocks(payload.messages[0].content);
     expect(content).toHaveLength(2);
     expect(content[0]).toEqual({
       type: "text",
@@ -87,7 +95,7 @@ describe("extra-params: OpenRouter Anthropic cache_control", () => {
 
     runOpenRouterPayload(payload, "anthropic/claude-opus-4-6");
 
-    const content = payload.messages[0].content as Array<Record<string, unknown>>;
+    const content = expectContentBlocks(payload.messages[0].content);
     expect(content[0]).toEqual({ type: "text", text: "Part 1" });
     expect(content[1]).toEqual({
       type: "text",
@@ -116,4 +124,3 @@ describe("extra-params: OpenRouter Anthropic cache_control", () => {
     expect(payload.messages[0].content).toBe("Hello");
   });
 });
-

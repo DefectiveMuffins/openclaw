@@ -612,7 +612,7 @@ export const FIELD_HELP: Record<string, string> = {
   "tools.fs.allowPaths":
     'Optional filesystem allowlist (relative to workspace unless absolute) for read/write/edit/apply_patch paths. When set, paths outside this list are denied. Use this to lock agents to specific folders such as "memory/" and identity files.',
   "tools.fs.denyPaths":
-    'Optional filesystem denylist (relative to workspace unless absolute) that blocks matching paths even if allowPaths includes them. Use this for high-risk locations like secrets directories or environment files.',
+    "Optional filesystem denylist (relative to workspace unless absolute) that blocks matching paths even if allowPaths includes them. Use this for high-risk locations like secrets directories or environment files.",
   "tools.fs.readOnlyPaths":
     "Optional filesystem read-only paths where reads are allowed but writes/edits are blocked. Use this to protect bootstrap and policy files from accidental modification while keeping them visible for context.",
   "tools.sessions.visibility":
@@ -630,7 +630,8 @@ export const FIELD_HELP: Record<string, string> = {
   "tools.message.crossContext.marker.suffix":
     'Text suffix for cross-context markers (supports "{channel}").',
   "tools.message.broadcast.enabled": "Enable broadcast action (default: true).",
-  "tools.web.search.enabled": "Enable the web_search tool (uses DuckDuckGo fallback when no provider API key is configured).",
+  "tools.web.search.enabled":
+    "Enable the web_search tool (uses DuckDuckGo fallback when no provider API key is configured).",
   "tools.web.search.provider":
     'Search provider ("brave", "perplexity", "grok", "gemini", "kimi", or "duckduckgo"). Auto-detected from available API keys, otherwise falls back to DuckDuckGo.',
   "tools.web.search.apiKey": "Brave Search API key (optional; fallback: BRAVE_API_KEY env var).",
@@ -753,7 +754,7 @@ export const FIELD_HELP: Record<string, string> = {
   "agents.defaults.skills":
     "Agent skills prompt settings controlling how installed skills are represented in the system prompt.",
   "agents.defaults.skills.promptMode":
-    "Skills prompt verbosity mode: \"full\" includes rich multi-line descriptions, while \"compact\" emits one-line summaries with SKILL.md locations to reduce prompt token usage.",
+    'Skills prompt verbosity mode: "full" includes rich multi-line descriptions, while "compact" emits one-line summaries with SKILL.md locations to reduce prompt token usage.',
   "agents.defaults.memorySearch":
     "Vector search over MEMORY.md and memory/*.md (per-agent overrides supported).",
   "agents.defaults.memorySearch.enabled":
@@ -1556,9 +1557,3 @@ export const FIELD_HELP: Record<string, string> = {
   "channels.slack.dmPolicy":
     'Direct message access control ("pairing" recommended). "open" requires channels.slack.allowFrom=["*"].',
 };
-
-
-
-
-
-

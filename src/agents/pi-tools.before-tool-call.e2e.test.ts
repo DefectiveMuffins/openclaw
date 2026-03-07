@@ -396,4 +396,3 @@ describe("before_tool_call loop detection behavior", () => {
     expect(readExecute).toHaveBeenCalledTimes(2);
   });
 });
-

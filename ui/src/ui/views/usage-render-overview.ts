@@ -426,8 +426,7 @@ function applySessionToUsageAgenticAccumulator(
 
   if (memorySearch) {
     acc.memorySearchCalls += memorySearch.calls;
-    acc.workingSetHitCalls +=
-      memorySearch.hitCalls ?? (memorySearch.workingSetHits > 0 ? 1 : 0);
+    acc.workingSetHitCalls += memorySearch.hitCalls ?? (memorySearch.workingSetHits > 0 ? 1 : 0);
   }
 
   if (!counters && delegation) {
@@ -449,8 +448,7 @@ function buildUsageAgenticBreakdownEntries(
         workingSetHitRate:
           acc.memorySearchCalls > 0 ? acc.workingSetHitCalls / acc.memorySearchCalls : undefined,
         escalationRate: acc.routedRuns > 0 ? acc.escalations / acc.routedRuns : undefined,
-        conflictRate:
-          conflictBase > 0 ? acc.delegationConflictSignals / conflictBase : undefined,
+        conflictRate: conflictBase > 0 ? acc.delegationConflictSignals / conflictBase : undefined,
         activityScore:
           acc.routedRuns +
           acc.memorySearchCalls +
@@ -462,9 +460,7 @@ function buildUsageAgenticBreakdownEntries(
     .toSorted((a, b) => b.activityScore - a.activityScore || a.label.localeCompare(b.label));
 }
 
-function buildUsageAgenticOverviewStats(
-  sessions: UsageSessionEntry[],
-): UsageAgenticOverviewStats {
+function buildUsageAgenticOverviewStats(sessions: UsageSessionEntry[]): UsageAgenticOverviewStats {
   const totals = createUsageAgenticAccumulator();
   const byAgent = new Map<string, UsageAgenticAccumulator>();
   const byChannel = new Map<string, UsageAgenticAccumulator>();
@@ -566,28 +562,32 @@ function renderUsageInsights(
   const throughputHint = "Throughput shows tokens per minute over active time. Higher is better.";
   const tokensHint = "Average tokens per message in this range.";
   const cheapPathRate =
-    agenticStats.routedRuns > 0
-      ? agenticStats.cheapPathRuns / agenticStats.routedRuns
-      : undefined;
+    agenticStats.routedRuns > 0 ? agenticStats.cheapPathRuns / agenticStats.routedRuns : undefined;
   const workingSetHitRate =
     agenticStats.memorySearchCalls > 0
       ? agenticStats.workingSetHitCalls / agenticStats.memorySearchCalls
       : undefined;
   const escalationRate =
-    agenticStats.routedRuns > 0
-      ? agenticStats.escalations / agenticStats.routedRuns
-      : undefined;
-  const conflictBase =
-    agenticStats.structuredDelegationReports || agenticStats.delegationReports;
-  const conflictRate = conflictBase > 0
-    ? agenticStats.delegationConflictSignals / conflictBase
-    : undefined;
-  const cheapPathHint = "Cheap path rate = runs kept on planner/retrieval/compression cheap models / routed runs.";
-  const workingSetHint = "Working-set hit rate = memory searches with at least one working-set hit / total memory searches.";
-  const escalationHint = "Escalation rate = routed runs that promoted back to the primary synthesis model path.";
-  const conflictHint = "Conflict signals count structured delegation reports that mention disagreement, contradiction, or inconsistency.";
+    agenticStats.routedRuns > 0 ? agenticStats.escalations / agenticStats.routedRuns : undefined;
+  const conflictBase = agenticStats.structuredDelegationReports || agenticStats.delegationReports;
+  const conflictRate =
+    conflictBase > 0 ? agenticStats.delegationConflictSignals / conflictBase : undefined;
+  const cheapPathHint =
+    "Cheap path rate = runs kept on planner/retrieval/compression cheap models / routed runs.";
+  const workingSetHint =
+    "Working-set hit rate = memory searches with at least one working-set hit / total memory searches.";
+  const escalationHint =
+    "Escalation rate = routed runs that promoted back to the primary synthesis model path.";
+  const conflictHint =
+    "Conflict signals count structured delegation reports that mention disagreement, contradiction, or inconsistency.";
   const cheapPathClass =
-    cheapPathRate === undefined ? "" : cheapPathRate >= 0.5 ? "good" : cheapPathRate > 0 ? "warn" : "";
+    cheapPathRate === undefined
+      ? ""
+      : cheapPathRate >= 0.5
+        ? "good"
+        : cheapPathRate > 0
+          ? "warn"
+          : "";
   const workingSetClass =
     workingSetHitRate === undefined
       ? ""

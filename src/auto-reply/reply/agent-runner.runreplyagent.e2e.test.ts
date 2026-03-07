@@ -381,7 +381,10 @@ describe("runReplyAgent typing (heartbeat)", () => {
       await params.onAssistantMessageStart?.();
       await params.onPartialReply?.({ text: "direct answer leak" });
       await params.onBlockReply?.({ text: "direct block leak", mediaUrls: [] });
-      recordDelegatedSubagentSpawn({ sessionKey: "main", sessionId: "session" }, "agent:main:subagent:child-1");
+      recordDelegatedSubagentSpawn(
+        { sessionKey: "main", sessionId: "session" },
+        "agent:main:subagent:child-1",
+      );
       await params.onReasoningStream?.({ text: "Reasoning after delegation" });
       await params.onAssistantMessageStart?.();
       await params.onPartialReply?.({ text: "delegated answer chunk" });
@@ -1926,6 +1929,3 @@ describe("runReplyAgent memory flush", () => {
     });
   });
 });
-
-
-

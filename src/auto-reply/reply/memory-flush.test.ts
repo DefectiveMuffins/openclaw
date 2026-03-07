@@ -41,7 +41,7 @@ describe("shouldRunMemoryFlush", () => {
     const shouldFlush = shouldRunMemoryFlush({
       entry: {
         totalTokens: 100,
-        totalTokensFresh: 100,
+        totalTokensFresh: true,
         memoryFlushTurnCount: 6,
       },
       contextWindowTokens: 100_000,
@@ -58,7 +58,7 @@ describe("shouldRunMemoryFlush", () => {
     const shouldFlush = shouldRunMemoryFlush({
       entry: {
         totalTokens: 100,
-        totalTokensFresh: 100,
+        totalTokensFresh: true,
         memoryFlushTurnCount: 5,
       },
       contextWindowTokens: 100_000,
@@ -76,7 +76,7 @@ describe("shouldRunMemoryFlush", () => {
     const shouldFlush = shouldRunMemoryFlush({
       entry: {
         totalTokens: 100,
-        totalTokensFresh: 100,
+        totalTokensFresh: true,
         memoryFlushTurnCount: 0,
         memoryFlushAt: nowMs - 31 * 60 * 1000,
       },

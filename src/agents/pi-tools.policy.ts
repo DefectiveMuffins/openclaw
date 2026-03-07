@@ -197,7 +197,6 @@ function resolveProviderToolPolicy(params: {
   return undefined;
 }
 
-
 export function resolveEffectiveToolPolicy(params: {
   config?: OpenClawConfig;
   sessionKey?: string;
@@ -219,7 +218,7 @@ export function resolveEffectiveToolPolicy(params: {
 
   const profile = shouldForceTopLevelDelegation(params.sessionKey)
     ? "orchestrator"
-    : agentTools?.profile ?? globalTools?.profile;
+    : (agentTools?.profile ?? globalTools?.profile);
   const providerPolicy = resolveProviderToolPolicy({
     byProvider: globalTools?.byProvider,
     modelProvider: params.modelProvider,
@@ -317,4 +316,3 @@ export function isToolAllowedByPolicies(
 ) {
   return policies.every((policy) => isToolAllowedByPolicyName(name, policy));
 }
-

@@ -376,8 +376,7 @@ export function resolveAgentOptimizationSummary(
   agentId: string,
 ): AgentOptimizationSummary {
   const { entry, defaults } = resolveAgentConfig(config, agentId);
-  const entrySkills =
-    entry?.skills && !Array.isArray(entry.skills) ? (entry.skills as AgentSkillsConfig) : undefined;
+  const entrySkills = entry?.skills && !Array.isArray(entry.skills) ? entry.skills : undefined;
   const defaultSkills = defaults?.skills;
   const defaultMemory = defaults?.memorySearch;
   const entryMemory = entry?.memorySearch;

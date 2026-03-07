@@ -113,7 +113,6 @@ export function formatThinkingLevels(
   return listThinkingLevelLabels(provider, model).join(separator);
 }
 
-
 const SIMPLE_ADAPTIVE_TEXT_RE =
   /^(hi|hello|hey|yo|sup|ping|status\??|thanks|thank you|ok|okay|cool|nice)\s*[!.?]*$/i;
 const ADAPTIVE_HIGH_COMPLEXITY_RE =
@@ -150,7 +149,11 @@ export function resolveAdaptiveThinkLevel(
   const combined = `${text}\n${historyText}`;
   const lower = text.toLowerCase();
 
-  if (text.length < 50 && SIMPLE_ADAPTIVE_TEXT_RE.test(text) && !ADAPTIVE_CODE_SIGNAL_RE.test(text)) {
+  if (
+    text.length < 50 &&
+    SIMPLE_ADAPTIVE_TEXT_RE.test(text) &&
+    !ADAPTIVE_CODE_SIGNAL_RE.test(text)
+  ) {
     return /\bstatus\b/i.test(text) ? "minimal" : "off";
   }
 

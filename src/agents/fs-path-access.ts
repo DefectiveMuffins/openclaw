@@ -1,13 +1,16 @@
 import path from "node:path";
-import type { ToolFsPolicy } from "./tool-fs-policy.js";
 import { isPathInside } from "../infra/path-guards.js";
+import type { ToolFsPolicy } from "./tool-fs-policy.js";
 
 export type FsAccessOperation = "read" | "write";
 
 type AccessAllowed = { allowed: true };
 type AccessDenied = { allowed: false; reason: string };
 
-function resolvePathRule(rule: string, workspaceDir: string): {
+function resolvePathRule(
+  rule: string,
+  workspaceDir: string,
+): {
   raw: string;
   resolved: string;
   directoryLike: boolean;

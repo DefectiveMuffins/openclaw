@@ -133,7 +133,9 @@ describe("wrapToolWorkspaceRootGuardWithOptions", () => {
       enforceWorkspaceRoot: false,
     });
 
-    await expect(wrapped.execute("tc-readonly", { path: path.resolve(root, "AGENTS.md") })).rejects.toThrow(
+    await expect(
+      wrapped.execute("tc-readonly", { path: path.resolve(root, "AGENTS.md") }),
+    ).rejects.toThrow(
       /Filesystem access denied: path is read-only via tools\.fs\.readOnlyPaths: AGENTS\.md/,
     );
   });

@@ -1,3 +1,4 @@
+import { applyRoutingSummaryToAgenticCounters } from "../../agents/agentic-counters.js";
 import { setCliSessionId } from "../../agents/cli-session.js";
 import {
   deriveSessionTotalTokens,
@@ -11,7 +12,6 @@ import {
   updateSessionStoreEntry,
 } from "../../config/sessions.js";
 import { logVerbose } from "../../globals.js";
-import { applyRoutingSummaryToAgenticCounters } from "../../agents/agentic-counters.js";
 
 function applyCliSessionIdToSessionPatch(
   params: {

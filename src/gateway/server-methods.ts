@@ -16,6 +16,11 @@ import { doctorHandlers } from "./server-methods/doctor.js";
 import { execApprovalsHandlers } from "./server-methods/exec-approvals.js";
 import { healthHandlers } from "./server-methods/health.js";
 import { logsHandlers } from "./server-methods/logs.js";
+import {
+  buildGatewayHandlerManifest,
+  findGatewayHandlerManifestEntry,
+  handlersFromGatewayHandlerManifest,
+} from "./server-methods/manifest.js";
 import { modelsHandlers } from "./server-methods/models.js";
 import { nodeHandlers } from "./server-methods/nodes.js";
 import { pushHandlers } from "./server-methods/push.js";
@@ -26,19 +31,25 @@ import { systemHandlers } from "./server-methods/system.js";
 import { talkHandlers } from "./server-methods/talk.js";
 import { toolsCatalogHandlers } from "./server-methods/tools-catalog.js";
 import { ttsHandlers } from "./server-methods/tts.js";
-import type { GatewayRequestHandlers, GatewayRequestOptions } from "./server-methods/types.js";
+import type {
+  GatewayRequestHandlerManifestEntry,
+  GatewayRequestHandlers,
+  GatewayRequestOptions,
+} from "./server-methods/types.js";
 import { updateHandlers } from "./server-methods/update.js";
 import { usageHandlers } from "./server-methods/usage.js";
 import { voicewakeHandlers } from "./server-methods/voicewake.js";
 import { webHandlers } from "./server-methods/web.js";
 import { wizardHandlers } from "./server-methods/wizard.js";
 
-const CONTROL_PLANE_WRITE_METHODS = new Set(["config.apply", "config.patch", "update.run"]);
-function authorizeGatewayMethod(method: string, client: GatewayRequestOptions["client"]) {
-  if (!client?.connect) {
+function authorizeGatewayMethod(
+  entry: GatewayRequestHandlerManifestEntry,
+  client: GatewayRequestOptions["client"],
+) {
+  if (entry.auth === "none") {
     return null;
   }
-  if (method === "health") {
+  if (!client?.connect) {
     return null;
   }
   const roleRaw = client.connect.role ?? "operator";
@@ -47,7 +58,7 @@ function authorizeGatewayMethod(method: string, client: GatewayRequestOptions["c
     return errorShape(ErrorCodes.INVALID_REQUEST, `unauthorized role: ${roleRaw}`);
   }
   const scopes = client.connect.scopes ?? [];
-  if (!isRoleAuthorizedForMethod(role, method)) {
+  if (!isRoleAuthorizedForMethod(role, entry.method)) {
     return errorShape(ErrorCodes.INVALID_REQUEST, `unauthorized role: ${role}`);
   }
   if (role === "node") {
@@ -56,54 +67,82 @@ function authorizeGatewayMethod(method: string, client: GatewayRequestOptions["c
   if (scopes.includes(ADMIN_SCOPE)) {
     return null;
   }
-  const scopeAuth = authorizeOperatorScopesForMethod(method, scopes);
+  const scopeAuth = authorizeOperatorScopesForMethod(entry.method, scopes);
   if (!scopeAuth.allowed) {
     return errorShape(ErrorCodes.INVALID_REQUEST, `missing scope: ${scopeAuth.missingScope}`);
   }
   return null;
 }
 
-export const coreGatewayHandlers: GatewayRequestHandlers = {
-  ...connectHandlers,
-  ...logsHandlers,
-  ...voicewakeHandlers,
-  ...healthHandlers,
-  ...channelsHandlers,
-  ...chatHandlers,
-  ...cronHandlers,
-  ...deviceHandlers,
-  ...doctorHandlers,
-  ...execApprovalsHandlers,
-  ...webHandlers,
-  ...modelsHandlers,
-  ...configHandlers,
-  ...wizardHandlers,
-  ...talkHandlers,
-  ...toolsCatalogHandlers,
-  ...ttsHandlers,
-  ...skillsHandlers,
-  ...sessionsHandlers,
-  ...systemHandlers,
-  ...updateHandlers,
-  ...nodeHandlers,
-  ...pushHandlers,
-  ...sendHandlers,
-  ...usageHandlers,
-  ...agentHandlers,
-  ...agentsHandlers,
-  ...browserHandlers,
-};
+export const coreGatewayHandlerManifest = buildGatewayHandlerManifest([
+  { handlers: connectHandlers },
+  { handlers: logsHandlers },
+  { handlers: voicewakeHandlers },
+  { handlers: healthHandlers, methodAuth: { health: "none" } },
+  { handlers: channelsHandlers },
+  { handlers: chatHandlers },
+  { handlers: cronHandlers },
+  { handlers: deviceHandlers },
+  { handlers: doctorHandlers },
+  { handlers: execApprovalsHandlers },
+  { handlers: webHandlers },
+  { handlers: modelsHandlers },
+  { handlers: configHandlers, controlPlaneWriteMethods: ["config.apply", "config.patch"] },
+  { handlers: wizardHandlers },
+  { handlers: talkHandlers },
+  { handlers: toolsCatalogHandlers },
+  { handlers: ttsHandlers },
+  { handlers: skillsHandlers },
+  { handlers: sessionsHandlers },
+  { handlers: systemHandlers },
+  { handlers: updateHandlers, controlPlaneWriteMethods: ["update.run"] },
+  { handlers: nodeHandlers },
+  { handlers: pushHandlers },
+  { handlers: sendHandlers },
+  { handlers: usageHandlers },
+  { handlers: agentHandlers },
+  { handlers: agentsHandlers },
+  { handlers: browserHandlers },
+]);
+
+export const coreGatewayHandlers: GatewayRequestHandlers = handlersFromGatewayHandlerManifest(
+  coreGatewayHandlerManifest,
+);
+
+function resolveGatewayHandlerEntry(
+  method: string,
+  extraHandlers?: GatewayRequestHandlers,
+): GatewayRequestHandlerManifestEntry | undefined {
+  const extraHandler = extraHandlers?.[method];
+  if (extraHandler) {
+    return {
+      method,
+      handler: extraHandler,
+    };
+  }
+  return findGatewayHandlerManifestEntry(coreGatewayHandlerManifest, method);
+}
 
 export async function handleGatewayRequest(
   opts: GatewayRequestOptions & { extraHandlers?: GatewayRequestHandlers },
 ): Promise<void> {
   const { req, respond, client, isWebchatConnect, context } = opts;
-  const authError = authorizeGatewayMethod(req.method, client);
+  const handlerEntry = resolveGatewayHandlerEntry(req.method, opts.extraHandlers);
+  if (!handlerEntry) {
+    respond(
+      false,
+      undefined,
+      errorShape(ErrorCodes.INVALID_REQUEST, `unknown method: ${req.method}`),
+    );
+    return;
+  }
+
+  const authError = authorizeGatewayMethod(handlerEntry, client);
   if (authError) {
     respond(false, undefined, authError);
     return;
   }
-  if (CONTROL_PLANE_WRITE_METHODS.has(req.method)) {
+  if (handlerEntry.controlPlaneWrite) {
     const budget = consumeControlPlaneWriteBudget({ client });
     if (!budget.allowed) {
       const actor = resolveControlPlaneActor(client);
@@ -129,16 +168,7 @@ export async function handleGatewayRequest(
       return;
     }
   }
-  const handler = opts.extraHandlers?.[req.method] ?? coreGatewayHandlers[req.method];
-  if (!handler) {
-    respond(
-      false,
-      undefined,
-      errorShape(ErrorCodes.INVALID_REQUEST, `unknown method: ${req.method}`),
-    );
-    return;
-  }
-  await handler({
+  await handlerEntry.handler({
     req,
     params: (req.params ?? {}) as Record<string, unknown>,
     client,

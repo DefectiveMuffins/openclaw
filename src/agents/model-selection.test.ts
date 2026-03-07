@@ -542,7 +542,6 @@ describe("model-selection", () => {
   });
 });
 
-
 describe("resolveSubagentSpawnModelSelection", () => {
   it("uses simpleTaskModel when autoTier is enabled for simple tasks", () => {
     const cfg = {
@@ -638,4 +637,3 @@ describe("normalizeModelSelection", () => {
     expect(normalizeModelSelection(42)).toBeUndefined();
   });
 });
-

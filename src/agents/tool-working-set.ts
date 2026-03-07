@@ -1,8 +1,8 @@
 import crypto from "node:crypto";
 import { extractKeywords } from "../memory/query-expansion.js";
 import type { MemorySearchResult } from "../memory/types.js";
-import { normalizeToolName } from "./tool-policy.js";
 import { extractToolResultText } from "./pi-embedded-subscribe.tools.js";
+import { normalizeToolName } from "./tool-policy.js";
 
 export type WorkingSetSource = "toolResults" | "subagentReports";
 
@@ -109,12 +109,19 @@ function truncateText(text: string, maxChars = 2400): string {
   return `${trimmed.slice(0, maxChars).trimEnd()}...`;
 }
 
-function resolveEntryPath(toolName: string | undefined, params: unknown, result: unknown): string | undefined {
-  const paramsRecord = params && typeof params === "object" ? (params as Record<string, unknown>) : undefined;
-  const resultRecord = result && typeof result === "object" ? (result as Record<string, unknown>) : undefined;
-  const details = resultRecord?.details && typeof resultRecord.details === "object"
-    ? (resultRecord.details as Record<string, unknown>)
-    : undefined;
+function resolveEntryPath(
+  toolName: string | undefined,
+  params: unknown,
+  result: unknown,
+): string | undefined {
+  const paramsRecord =
+    params && typeof params === "object" ? (params as Record<string, unknown>) : undefined;
+  const resultRecord =
+    result && typeof result === "object" ? (result as Record<string, unknown>) : undefined;
+  const details =
+    resultRecord?.details && typeof resultRecord.details === "object"
+      ? (resultRecord.details as Record<string, unknown>)
+      : undefined;
   const pathCandidate =
     (typeof details?.path === "string" && details.path) ||
     (typeof resultRecord?.path === "string" && resultRecord.path) ||
@@ -260,20 +267,27 @@ export function searchWorkingSet(params: {
       const ageRatio = Math.max(0, Math.min(1, (entry.expiresAt - now) / resolved.ttlMs));
       const recencyBoost = ageRatio * 0.15;
       const biasBoost = params.sourceBias === "working-set" ? 0.1 : 0;
-      const score = Math.max(0, Math.min(1, overlapScore * 0.6 + fullMatchBoost + pathBoost + recencyBoost + biasBoost));
+      const score = Math.max(
+        0,
+        Math.min(1, overlapScore * 0.6 + fullMatchBoost + pathBoost + recencyBoost + biasBoost),
+      );
       return { entry, score };
     })
     .filter((candidate) => candidate.score > 0)
-    .sort((a, b) => b.score - a.score)
+    .toSorted((a, b) => b.score - a.score)
     .slice(0, params.maxResults)
-    .map(({ entry, score }) => ({
-      path: entry.path ?? `working-set/${entry.source}/${entry.toolName ?? entry.id.slice(0, 8)}`,
-      startLine: 1,
-      endLine: 1,
-      score,
-      snippet: entry.text,
-      source: "working-set" as const,
-    } satisfies MemorySearchResult));
+    .map(
+      ({ entry, score }) =>
+        ({
+          path:
+            entry.path ?? `working-set/${entry.source}/${entry.toolName ?? entry.id.slice(0, 8)}`,
+          startLine: 1,
+          endLine: 1,
+          score,
+          snippet: entry.text,
+          source: "working-set" as const,
+        }) satisfies MemorySearchResult,
+    );
   return scored;
 }
 

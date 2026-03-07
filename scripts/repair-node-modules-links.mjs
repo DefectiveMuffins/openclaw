@@ -20,7 +20,7 @@ const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
 const dependencyNames = new Set([
   ...Object.keys(packageJson.dependencies ?? {}),
   ...Object.keys(packageJson.optionalDependencies ?? {}),
-  ...Object.keys(packageJson.devDependencies ?? {})
+  ...Object.keys(packageJson.devDependencies ?? {}),
 ]);
 
 const pnpmEntries = fs
@@ -34,20 +34,30 @@ fs.mkdirSync(sharedNodeModulesDir, { recursive: true });
 const packageTargets = new Map();
 
 for (const entryName of pnpmEntries) {
-  if (entryName === "node_modules") continue;
+  if (entryName === "node_modules") {
+    continue;
+  }
   const entryNodeModulesDir = path.join(pnpmDir, entryName, "node_modules");
-  if (!fs.existsSync(entryNodeModulesDir)) continue;
+  if (!fs.existsSync(entryNodeModulesDir)) {
+    continue;
+  }
 
   const level1 = fs.readdirSync(entryNodeModulesDir, { withFileTypes: true });
   for (const child of level1) {
-    if (!child.isDirectory()) continue;
-    if (child.name === ".bin") continue;
+    if (!child.isDirectory()) {
+      continue;
+    }
+    if (child.name === ".bin") {
+      continue;
+    }
 
     if (child.name.startsWith("@")) {
       const scopeDir = path.join(entryNodeModulesDir, child.name);
       const scopedChildren = fs.readdirSync(scopeDir, { withFileTypes: true });
       for (const scopedChild of scopedChildren) {
-        if (!scopedChild.isDirectory()) continue;
+        if (!scopedChild.isDirectory()) {
+          continue;
+        }
         const packageName = `${child.name}/${scopedChild.name}`;
         const targetDir = path.join(scopeDir, scopedChild.name);
         if (!packageTargets.has(packageName)) {
@@ -71,13 +81,17 @@ let missing = 0;
 
 function createLink(baseDir, packageName, targetDir) {
   const linkPath = path.join(baseDir, ...packageName.split("/"));
-  if (fs.existsSync(linkPath)) return false;
+  if (fs.existsSync(linkPath)) {
+    return false;
+  }
   fs.mkdirSync(path.dirname(linkPath), { recursive: true });
   try {
     fs.symlinkSync(targetDir, linkPath, "junction");
     return true;
   } catch (error) {
-    if (error.code === "EEXIST") return false;
+    if (error.code === "EEXIST") {
+      return false;
+    }
     throw error;
   }
 }
@@ -100,5 +114,5 @@ for (const packageName of dependencyNames) {
 }
 
 console.log(
-  `Repaired links from .pnpm store (shared: ${sharedCreated}, direct: ${directCreated}). Missing direct packages: ${missing}.`
+  `Repaired links from .pnpm store (shared: ${sharedCreated}, direct: ${directCreated}). Missing direct packages: ${missing}.`,
 );

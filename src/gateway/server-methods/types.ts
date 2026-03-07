@@ -110,3 +110,14 @@ export type GatewayRequestHandlerOptions = {
 export type GatewayRequestHandler = (opts: GatewayRequestHandlerOptions) => Promise<void> | void;
 
 export type GatewayRequestHandlers = Record<string, GatewayRequestHandler>;
+
+export type GatewayRequestHandlerAuthMode = "default" | "none";
+
+export type GatewayRequestHandlerManifestEntry = {
+  method: string;
+  handler: GatewayRequestHandler;
+  auth?: GatewayRequestHandlerAuthMode;
+  controlPlaneWrite?: boolean;
+};
+
+export type GatewayRequestHandlerManifest = GatewayRequestHandlerManifestEntry[];

@@ -533,8 +533,6 @@ example
     expect(summary?.agentic?.delegation?.structuredResponses).toBe(1);
     expect(summary?.agentic?.delegation?.readOnlySpawns).toBe(1);
     expect(summary?.agentic?.delegation?.roles[0]?.role).toBe("research");
-    expect(summary?.agentic?.delegation?.modelsApplied).toEqual([
-      "anthropic/claude-haiku-4-5",
-    ]);
+    expect(summary?.agentic?.delegation?.modelsApplied).toEqual(["anthropic/claude-haiku-4-5"]);
   });
 });

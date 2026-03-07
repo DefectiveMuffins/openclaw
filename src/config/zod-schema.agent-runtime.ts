@@ -855,5 +855,3 @@ export const ToolsSchema = z
     );
   })
   .optional();
-
-

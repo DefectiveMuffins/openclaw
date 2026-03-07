@@ -158,10 +158,11 @@ export async function applyInlineDirectiveOverrides(params: {
       agentCfg,
       resolveDefaultThinkingLevel: () => modelState.resolveDefaultThinkingLevel(),
       messageText: directives.cleaned,
-      recentHistory: [ ...(ctx.InboundHistory ?? [])
-        .map((entry) => entry?.body)
-        .filter((body): body is string => typeof body === "string" && body.trim().length > 0)
-        .slice(-4),
+      recentHistory: [
+        ...(ctx.InboundHistory ?? [])
+          .map((entry) => entry?.body)
+          .filter((body): body is string => typeof body === "string" && body.trim().length > 0)
+          .slice(-4),
         ...(ctx.ThreadHistoryBody ? [ctx.ThreadHistoryBody] : []),
         ...(ctx.Transcript ? [ctx.Transcript] : []),
       ],
@@ -299,4 +300,3 @@ export async function applyInlineDirectiveOverrides(params: {
     perMessageQueueOptions,
   };
 }
-

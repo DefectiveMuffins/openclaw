@@ -5,7 +5,7 @@ import type {
   GatewayModelChoice,
   ToolsCatalogResult,
 } from "../types.ts";
-import { updateConfigFormValue } from "./config.ts";
+import { updateConfigFormValue, type ConfigFormState } from "./config.ts";
 
 const LMSTUDIO_PROVIDER_ID = "lmstudio";
 const LMSTUDIO_DEFAULT_BASE_URL = "http://127.0.0.1:1234/v1";
@@ -93,10 +93,10 @@ function normalizeGatewayModelChoices(models: unknown[]): GatewayModelChoice[] {
         ? (entry as { reasoning: boolean }).reasoning
         : undefined;
     const input = Array.isArray((entry as { input?: unknown }).input)
-      ? ((entry as { input: unknown[] }).input.filter(
+      ? (entry as { input: unknown[] }).input.filter(
           (value): value is GatewayModelChoiceInput =>
             value === "text" || value === "image" || value === "document",
-        ) as GatewayModelChoiceInput[])
+        )
       : undefined;
     return [
       {
@@ -129,7 +129,7 @@ function normalizeProviderModelInput(input?: GatewayModelChoiceInput[]): Array<"
 function sortProviderModelDefinitions(
   models: ProviderModelDefinition[],
 ): ProviderModelDefinition[] {
-  return [...models].sort((left, right) => {
+  return models.toSorted((left, right) => {
     const nameCmp = left.name.localeCompare(right.name);
     if (nameCmp !== 0) {
       return nameCmp;
@@ -155,11 +155,14 @@ function buildDiscoveredModelDefinitions(
       if (!id) {
         continue;
       }
-      const inputValues = Array.isArray((entry as { input?: unknown }).input)
+      const inputValues: ProviderModelDefinition["input"] = Array.isArray(
+        (entry as { input?: unknown }).input,
+      )
         ? (entry as { input: unknown[] }).input.filter(
             (value): value is "text" | "image" => value === "text" || value === "image",
           )
         : ["text"];
+      const defaultInput: ProviderModelDefinition["input"] = ["text"];
       merged.set(id, {
         id,
         name:
@@ -171,7 +174,7 @@ function buildDiscoveredModelDefinitions(
           typeof (entry as { reasoning?: unknown }).reasoning === "boolean"
             ? (entry as { reasoning: boolean }).reasoning
             : false,
-        input: inputValues.length > 0 ? inputValues : ["text"],
+        input: inputValues.length > 0 ? inputValues : defaultInput,
         cost:
           typeof (entry as { cost?: unknown }).cost === "object" &&
           (entry as { cost?: unknown }).cost
@@ -306,10 +309,7 @@ export async function discoverProviderModels(state: AgentsState, providerId: str
         ? res.providerId.trim()
         : providerId;
     state.agentModelChoices = mergeModelChoices(state.agentModelChoices, discovered);
-    const baseConfig = (state.configForm ?? state.configSnapshot?.config ?? {}) as Record<
-      string,
-      unknown
-    >;
+    const baseConfig = state.configForm ?? state.configSnapshot?.config ?? {};
     const providers = resolveProvidersConfig(baseConfig);
     const existingProvider = providers[effectiveProviderId];
     const providerConfig = mergeDiscoveredProviderConfig(
@@ -317,8 +317,9 @@ export async function discoverProviderModels(state: AgentsState, providerId: str
       existingProvider,
       discovered,
     );
+    const configFormState: ConfigFormState = state;
     updateConfigFormValue(
-      state as Parameters<typeof updateConfigFormValue>[0],
+      configFormState,
       ["models", "providers", effectiveProviderId],
       providerConfig,
     );

@@ -1,7 +1,7 @@
 import type { ToolResultCacheConfig } from "../config/types.tools.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
-import { normalizeToolName } from "./tool-policy.js";
 import { hashToolCall } from "./tool-loop-detection.js";
+import { normalizeToolName } from "./tool-policy.js";
 
 const log = createSubsystemLogger("agents/tool-result-cache");
 

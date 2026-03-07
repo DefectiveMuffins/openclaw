@@ -34,12 +34,10 @@ describe("checkFsAccess", () => {
     expect(checkFsAccess(resolveInWorkspace("AGENTS.md"), workspaceDir, "read", policy)).toEqual({
       allowed: true,
     });
-    expect(checkFsAccess(resolveInWorkspace("AGENTS.md"), workspaceDir, "write", policy)).toEqual(
-      {
-        allowed: false,
-        reason: "path is read-only via tools.fs.readOnlyPaths: AGENTS.md",
-      },
-    );
+    expect(checkFsAccess(resolveInWorkspace("AGENTS.md"), workspaceDir, "write", policy)).toEqual({
+      allowed: false,
+      reason: "path is read-only via tools.fs.readOnlyPaths: AGENTS.md",
+    });
   });
 
   it("enforces allowPaths when configured", () => {
@@ -48,15 +46,17 @@ describe("checkFsAccess", () => {
       allowPaths: ["memory/", "MEMORY.md"],
     };
 
-    expect(checkFsAccess(resolveInWorkspace("memory/today.md"), workspaceDir, "write", policy)).toEqual(
-      { allowed: true },
-    );
-    expect(checkFsAccess(resolveInWorkspace("MEMORY.md"), workspaceDir, "write", policy)).toEqual(
-      { allowed: true },
-    );
-    expect(checkFsAccess(resolveInWorkspace("src/index.ts"), workspaceDir, "read", policy)).toEqual({
-      allowed: false,
-      reason: "path is outside tools.fs.allowPaths",
+    expect(
+      checkFsAccess(resolveInWorkspace("memory/today.md"), workspaceDir, "write", policy),
+    ).toEqual({ allowed: true });
+    expect(checkFsAccess(resolveInWorkspace("MEMORY.md"), workspaceDir, "write", policy)).toEqual({
+      allowed: true,
     });
+    expect(checkFsAccess(resolveInWorkspace("src/index.ts"), workspaceDir, "read", policy)).toEqual(
+      {
+        allowed: false,
+        reason: "path is outside tools.fs.allowPaths",
+      },
+    );
   });
 });
