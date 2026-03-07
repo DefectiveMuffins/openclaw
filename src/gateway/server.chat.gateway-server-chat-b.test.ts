@@ -396,6 +396,59 @@ describe("gateway server chat", () => {
       expect(JSON.stringify(messages)).not.toContain(BARE_SESSION_RESET_PROMPT);
     });
   });
+  test("chat.history keeps only the latest visible startup assistant message before the first real user turn", async () => {
+    await withGatewayChatHarness(async ({ ws, createSessionDir }) => {
+      await connectOk(ws);
+
+      const sessionDir = await createSessionDir();
+      await writeMainSessionStore();
+
+      const lines = [
+        JSON.stringify({
+          message: {
+            role: "user",
+            content: [{ type: "text", text: BARE_SESSION_RESET_PROMPT }],
+            timestamp: Date.now(),
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Hey there! I'm ready to help you out -- what's on your mind?" }],
+            timestamp: Date.now() + 1,
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Hey! I'm your AI assistant -- think of me as your digital companion who's here to actually help without the corporate drone vibes. What are we working on today?" }],
+            timestamp: Date.now() + 2,
+          },
+        }),
+        JSON.stringify({
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Hey! I'm your AI assistant -- think of me as your digital companion who's here to actually help without the corporate drone vibes. What are we working on today?" }],
+            timestamp: Date.now() + 3,
+          },
+        }),
+      ];
+      await writeMainSessionTranscript(sessionDir, lines);
+      const messages = await fetchHistoryMessages(ws);
+
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toMatchObject({
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "Hey! I'm your AI assistant -- think of me as your digital companion who's here to actually help without the corporate drone vibes. What are we working on today?",
+          },
+        ],
+      });
+      expect(JSON.stringify(messages)).not.toContain(BARE_SESSION_RESET_PROMPT);
+    });
+  });
   test("chat.history strips inline directives from displayed message text", async () => {
     await withGatewayChatHarness(async ({ ws, createSessionDir }) => {
       await connectOk(ws);
@@ -540,4 +593,5 @@ describe("gateway server chat", () => {
     });
   });
 });
+
 

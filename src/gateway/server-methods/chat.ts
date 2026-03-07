@@ -261,14 +261,18 @@ function isHiddenAssistantHistoryMessage(message: unknown): boolean {
   return isSilentReplyText(text, SILENT_REPLY_TOKEN);
 }
 
-function collapseLeadingAssistantPreamble(messages: unknown[]): unknown[] {
+function collapseLeadingAssistantPreamble(
+  messages: unknown[],
+  options?: { collapseAssistantOnly?: boolean },
+): unknown[] {
   const firstUserIndex = messages.findIndex((message) => hasChatHistoryRole(message, "user"));
-  if (firstUserIndex < 0) {
+  if (firstUserIndex < 0 && !options?.collapseAssistantOnly) {
     return messages;
   }
+  const preambleEndIndex = firstUserIndex >= 0 ? firstUserIndex : messages.length;
 
   let lastAssistantIndex = -1;
-  for (let index = 0; index < firstUserIndex; index += 1) {
+  for (let index = 0; index < preambleEndIndex; index += 1) {
     if (hasChatHistoryRole(messages[index], "assistant")) {
       lastAssistantIndex = index;
     }
@@ -281,7 +285,7 @@ function collapseLeadingAssistantPreamble(messages: unknown[]): unknown[] {
   const next: unknown[] = [];
   for (let index = 0; index < messages.length; index += 1) {
     if (
-      index < firstUserIndex &&
+      index < preambleEndIndex &&
       hasChatHistoryRole(messages[index], "assistant") &&
       index !== lastAssistantIndex
     ) {
@@ -298,9 +302,15 @@ function sanitizeChatHistoryMessages(messages: unknown[]): unknown[] {
     return messages;
   }
   let changed = false;
+  let removedSyntheticResetPrompt = false;
   const next: unknown[] = [];
   for (const message of messages) {
-    if (isSyntheticSessionResetPromptMessage(message) || isHiddenAssistantHistoryMessage(message)) {
+    if (isSyntheticSessionResetPromptMessage(message)) {
+      changed = true;
+      removedSyntheticResetPrompt = true;
+      continue;
+    }
+    if (isHiddenAssistantHistoryMessage(message)) {
       changed = true;
       continue;
     }
@@ -309,7 +319,9 @@ function sanitizeChatHistoryMessages(messages: unknown[]): unknown[] {
     next.push(res.message);
   }
   const base = changed ? next : messages;
-  return collapseLeadingAssistantPreamble(base);
+  return collapseLeadingAssistantPreamble(base, {
+    collapseAssistantOnly: removedSyntheticResetPrompt,
+  });
 }
 
 function buildOversizedHistoryPlaceholder(message?: unknown): Record<string, unknown> {
@@ -1224,6 +1236,8 @@ export const chatHandlers: GatewayRequestHandlers = {
     respond(true, { ok: true, messageId: appended.messageId });
   },
 };
+
+
 
 
 
