@@ -6,7 +6,7 @@ import { normalizeAgentId } from "../routing/session-key.js";
 import { resolveThreadParentSessionKey } from "../sessions/session-key-utils.js";
 import { normalizeMessageChannel } from "../utils/message-channel.js";
 import { resolveAgentConfig, resolveAgentIdFromSessionKey } from "./agent-scope.js";
-import { shouldForceTopLevelDelegation } from "./delegation-enforcement.js";
+import { resolveTopLevelDelegationPolicy } from "./delegation-enforcement.js";
 import { compileGlobPatterns, matchesAnyGlobPattern } from "./glob-pattern.js";
 import type { AnyAgentTool } from "./pi-tools.types.js";
 import { pickSandboxToolPolicy } from "./sandbox-tool-policy.js";
@@ -203,6 +203,8 @@ export function resolveEffectiveToolPolicy(params: {
   agentId?: string;
   modelProvider?: string;
   modelId?: string;
+  delegationRequired?: boolean;
+  prompt?: string;
 }) {
   const explicitAgentId =
     typeof params.agentId === "string" && params.agentId.trim()
@@ -216,9 +218,14 @@ export function resolveEffectiveToolPolicy(params: {
   const agentTools = agentConfig?.tools;
   const globalTools = params.config?.tools;
 
-  const profile = shouldForceTopLevelDelegation(params.sessionKey)
-    ? "orchestrator"
-    : (agentTools?.profile ?? globalTools?.profile);
+  const delegationPolicy = resolveTopLevelDelegationPolicy({
+    config: params.config,
+    sessionKey: params.sessionKey,
+    prompt: params.prompt,
+    delegationRequired: params.delegationRequired,
+  });
+  const forcedProfile = delegationPolicy.forcedToolProfile;
+  const profile = forcedProfile ?? agentTools?.profile ?? globalTools?.profile;
   const providerPolicy = resolveProviderToolPolicy({
     byProvider: globalTools?.byProvider,
     modelProvider: params.modelProvider,
@@ -236,18 +243,22 @@ export function resolveEffectiveToolPolicy(params: {
     agentPolicy: pickSandboxToolPolicy(agentTools),
     agentProviderPolicy: pickSandboxToolPolicy(agentProviderPolicy),
     profile,
-    providerProfile: agentProviderPolicy?.profile ?? providerPolicy?.profile,
+    providerProfile: forcedProfile
+      ? undefined
+      : (agentProviderPolicy?.profile ?? providerPolicy?.profile),
     // alsoAllow is applied at the profile stage (to avoid being filtered out early).
     profileAlsoAllow: Array.isArray(agentTools?.alsoAllow)
       ? agentTools?.alsoAllow
       : Array.isArray(globalTools?.alsoAllow)
         ? globalTools?.alsoAllow
         : undefined,
-    providerProfileAlsoAllow: Array.isArray(agentProviderPolicy?.alsoAllow)
-      ? agentProviderPolicy?.alsoAllow
-      : Array.isArray(providerPolicy?.alsoAllow)
-        ? providerPolicy?.alsoAllow
-        : undefined,
+    providerProfileAlsoAllow: forcedProfile
+      ? undefined
+      : Array.isArray(agentProviderPolicy?.alsoAllow)
+        ? agentProviderPolicy?.alsoAllow
+        : Array.isArray(providerPolicy?.alsoAllow)
+          ? providerPolicy?.alsoAllow
+          : undefined,
   };
 }
 

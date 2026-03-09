@@ -337,6 +337,7 @@ export const ToolProfileSchema = z
     z.literal("coding"),
     z.literal("messaging"),
     z.literal("orchestrator"),
+    z.literal("manager"),
     z.literal("full"),
   ])
   .optional();

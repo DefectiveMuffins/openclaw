@@ -12,6 +12,11 @@ export type SessionState = {
   delegation?: {
     spawnedSubagentCount: number;
     childSessionKeys?: string[];
+    waitingForCompletions?: boolean;
+    expectedChildSessionKeys?: string[];
+    completedChildSessionKeys?: string[];
+    matchedCompletionCount?: number;
+    lastCompletionAt?: number;
   };
 };
 

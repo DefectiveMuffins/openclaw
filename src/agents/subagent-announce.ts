@@ -30,6 +30,7 @@ import {
   buildAnnounceIdempotencyKey,
   resolveQueueAnnounceId,
 } from "./announce-idempotency.js";
+import { recordDelegatedTaskCompletionEvent } from "./delegation-enforcement.js";
 import { formatAgentInternalEventsForPrompt, type AgentInternalEvent } from "./internal-events.js";
 import { resolveMemorySearchConfig } from "./memory-search.js";
 import {
@@ -1459,6 +1460,14 @@ export async function runSubagentAnnounceFlow(params: {
         replyInstruction,
       },
     ];
+    for (const event of internalEvents) {
+      recordDelegatedTaskCompletionEvent(
+        {
+          sessionKey: targetRequesterSessionKey,
+        },
+        event,
+      );
+    }
     triggerMessage = buildAnnounceSteerMessage(internalEvents);
     steerMessage = triggerMessage;
 

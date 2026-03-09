@@ -31,8 +31,8 @@ describe("pi-tools.policy", () => {
   });
 });
 
-describe("resolveEffectiveToolPolicy default orchestrator", () => {
-  it("defaults top-level requester sessions to the orchestrator profile", () => {
+describe("resolveEffectiveToolPolicy delegation modes", () => {
+  it("defaults top-level requester sessions to orchestrator in soft mode", () => {
     const resolved = resolveEffectiveToolPolicy({
       config: {} as OpenClawConfig,
       sessionKey: "agent:main:main",
@@ -40,28 +40,86 @@ describe("resolveEffectiveToolPolicy default orchestrator", () => {
     expect(resolved.profile).toBe("orchestrator");
   });
 
-  it("does not force orchestrator profile for subagent sessions", () => {
+  it("forces manager profile for top-level requester sessions in hard mode", () => {
     const resolved = resolveEffectiveToolPolicy({
-      config: {} as OpenClawConfig,
+      config: {
+        agents: { defaults: { subagents: { delegation: { mode: "hard" } } } },
+      } as OpenClawConfig,
+      sessionKey: "agent:main:main",
+    });
+    expect(resolved.profile).toBe("manager");
+    expect(resolved.providerProfile).toBeUndefined();
+    expect(resolved.providerProfileAlsoAllow).toBeUndefined();
+  });
+
+  it("supports action_only scope by forcing manager only for action prompts", () => {
+    const config = {
+      agents: {
+        defaults: {
+          subagents: {
+            delegation: {
+              mode: "hard",
+              scope: "action_only",
+            },
+          },
+        },
+      },
+    } as OpenClawConfig;
+
+    const actionPrompt = resolveEffectiveToolPolicy({
+      config,
+      sessionKey: "agent:main:main",
+      prompt: "Run tests and summarize failures",
+    });
+    expect(actionPrompt.profile).toBe("manager");
+
+    const nonActionPrompt = resolveEffectiveToolPolicy({
+      config,
+      sessionKey: "agent:main:main",
+      prompt: "hi there",
+    });
+    expect(nonActionPrompt.profile).toBeUndefined();
+  });
+
+  it("does not force delegation profile when mode is off", () => {
+    const resolved = resolveEffectiveToolPolicy({
+      config: {
+        agents: { defaults: { subagents: { delegation: { mode: "off" } } } },
+        tools: { profile: "messaging" },
+      } as OpenClawConfig,
+      sessionKey: "agent:main:main",
+    });
+    expect(resolved.profile).toBe("messaging");
+  });
+
+  it("does not force delegation profile for subagent sessions", () => {
+    const resolved = resolveEffectiveToolPolicy({
+      config: {
+        agents: { defaults: { subagents: { delegation: { mode: "hard" } } } },
+      } as OpenClawConfig,
       sessionKey: "agent:main:subagent:worker",
     });
     expect(resolved.profile).toBeUndefined();
   });
 
-  it("does not force orchestrator profile for cron sessions", () => {
+  it("does not force delegation profile for cron sessions", () => {
     const resolved = resolveEffectiveToolPolicy({
-      config: {} as OpenClawConfig,
+      config: {
+        agents: { defaults: { subagents: { delegation: { mode: "hard" } } } },
+      } as OpenClawConfig,
       sessionKey: "agent:main:cron:daily",
     });
     expect(resolved.profile).toBeUndefined();
   });
 
-  it("forces orchestrator profile for top-level requester sessions even when configured otherwise", () => {
+  it("does not force delegation profile for ACP sessions", () => {
     const resolved = resolveEffectiveToolPolicy({
-      config: { tools: { profile: "messaging" } } as OpenClawConfig,
-      sessionKey: "agent:main:main",
+      config: {
+        agents: { defaults: { subagents: { delegation: { mode: "hard" } } } },
+      } as OpenClawConfig,
+      sessionKey: "agent:main:acp:codex",
     });
-    expect(resolved.profile).toBe("orchestrator");
+    expect(resolved.profile).toBeUndefined();
   });
 });
 describe("resolveSubagentToolPolicy depth awareness", () => {
@@ -200,13 +258,13 @@ describe("resolveSubagentToolPolicy depth awareness", () => {
 
   it("defaults to leaf behavior when no depth is provided", () => {
     const policy = resolveSubagentToolPolicy(baseCfg);
-    // Default depth=1, maxSpawnDepth=2 → orchestrator
+    // Default depth=1, maxSpawnDepth=2 â†’ orchestrator
     expect(isToolAllowedByPolicyName("sessions_spawn", policy)).toBe(true);
   });
 
   it("defaults to leaf behavior when depth is undefined and maxSpawnDepth is 1", () => {
     const policy = resolveSubagentToolPolicy(leafCfg);
-    // Default depth=1, maxSpawnDepth=1 → leaf
+    // Default depth=1, maxSpawnDepth=1 â†’ leaf
     expect(isToolAllowedByPolicyName("sessions_spawn", policy)).toBe(false);
   });
 });

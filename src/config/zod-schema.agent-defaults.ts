@@ -216,6 +216,8 @@ export const AgentDefaultsSchema = z
         announceTimeoutMs: z.number().int().positive().optional(),
         delegation: z
           .object({
+            mode: z.enum(["off", "soft", "hard"]).optional(),
+            scope: z.enum(["all", "action_only"]).optional(),
             enabled: z.boolean().optional(),
             structuredResults: z.boolean().optional(),
             parallelResearch: z

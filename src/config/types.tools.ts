@@ -128,7 +128,13 @@ export type MediaToolsConfig = {
   video?: MediaUnderstandingConfig;
 };
 
-export type ToolProfileId = "minimal" | "coding" | "messaging" | "orchestrator" | "full";
+export type ToolProfileId =
+  | "minimal"
+  | "coding"
+  | "messaging"
+  | "orchestrator"
+  | "manager"
+  | "full";
 
 export type ToolLoopDetectionDetectorConfig = {
   /** Enable warning/blocking for repeated identical calls to the same tool/params. */

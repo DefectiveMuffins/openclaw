@@ -62,6 +62,16 @@ describe("tool-policy", () => {
     expect(orchestrator?.allow).toContain("sessions_spawn");
     expect(orchestrator?.allow).toContain("message");
     expect(orchestrator?.allow).not.toContain("exec");
+
+    const manager = resolveToolProfilePolicy("manager");
+    expect(manager?.allow).toContain("sessions_spawn");
+    expect(manager?.allow).toContain("sessions_history");
+    expect(manager?.allow).toContain("read");
+    expect(manager?.allow).not.toContain("exec");
+    expect(manager?.allow).not.toContain("write");
+    expect(manager?.allow).not.toContain("sessions_send");
+    expect(manager?.allow).not.toContain("message");
+
     expect(resolveToolProfilePolicy("nope")).toBeUndefined();
   });
 

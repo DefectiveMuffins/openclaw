@@ -1038,11 +1038,15 @@ export const FIELD_HELP: Record<string, string> = {
   "agents.defaults.subagents.simpleTaskModel":
     "Model ref used for simple subagent tasks when autoTier is enabled.",
   "agents.defaults.subagents.delegation":
-    "Structured delegation defaults for spawned subagents, including structured result envelopes and bounded parallel research fan-out. Enable this when parent agents should orchestrate smaller workers more deterministically.",
+    "Top-level delegation enforcement plus structured worker defaults for spawned subagents. Use mode=hard for strict manager/worker behavior, mode=soft for prompt/retry guidance, or mode=off to disable top-level forcing.",
+  "agents.defaults.subagents.delegation.mode":
+    "Top-level delegation enforcement mode: off disables forcing, soft keeps prompt/retry enforcement, hard enforces manager-only execution with worker completion gating.",
+  "agents.defaults.subagents.delegation.scope":
+    "Delegation scope for top-level turns: all enforces delegation on every top-level turn, action_only enforces only when the turn appears task-oriented.",
   "agents.defaults.subagents.delegation.enabled":
     "Enables delegation-aware spawn defaults such as structured result contracts and bounded research fan-out (default: false). Keep disabled for current freeform subagent behavior, or enable it for more deterministic orchestration.",
   "agents.defaults.subagents.delegation.structuredResults":
-    "Requires delegation-aware subagents to return structured completion envelopes instead of freeform-only text. Keep enabled when parent agents need compact, mergeable outputs with confidence and evidence fields.",
+    "Requires delegation-aware subagents to return structured completion envelopes instead of freeform-only text. Hard delegation mode defaults worker responses to structured output.",
   "agents.defaults.subagents.delegation.parallelResearch.enabled":
     "Allows read-only research and summarize subagents to fan out concurrently when delegation is enabled (default: false). Keep this conservative so mutation-oriented work stays serial unless explicitly widened.",
   "agents.defaults.subagents.delegation.parallelResearch.maxConcurrent":

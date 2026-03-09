@@ -156,6 +156,10 @@ export type AgentHostedRoutingConfig = {
 };
 
 export type AgentSubagentDelegationConfig = {
+  /** Top-level delegation enforcement mode: off (disabled), soft (prompt/retry), hard (strict manager/worker). Default: soft. */
+  mode?: "off" | "soft" | "hard";
+  /** Delegation scope: all top-level turns or action-oriented turns only. Default: all. */
+  scope?: "all" | "action_only";
   /** Enable structured delegation helpers for spawned subagents (default: false). */
   enabled?: boolean;
   /** Require structured completion envelopes for delegation-aware subagents (default: true when enabled). */

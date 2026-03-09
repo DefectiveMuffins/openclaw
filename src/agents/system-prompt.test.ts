@@ -154,6 +154,17 @@ describe("buildAgentSystemPrompt", () => {
     expect(prompt).toContain("MUST delegate all execution to subagents via sessions_spawn");
     expect(prompt).toContain("Never use exec or process directly");
   });
+  it("adds manager mode instructions for manager profile", () => {
+    const prompt = buildAgentSystemPrompt({
+      workspaceDir: "/tmp/openclaw",
+      toolProfile: "manager",
+    });
+
+    expect(prompt).toContain("## Manager Mode");
+    expect(prompt).toContain("planning -> waiting_for_workers -> synthesis");
+    expect(prompt).toContain("task_completion event");
+    expect(prompt).not.toContain("## Orchestrator Mode");
+  });
 
   it("renders memory staleness hints when provided", () => {
     const prompt = buildAgentSystemPrompt({
@@ -367,7 +378,7 @@ describe("buildAgentSystemPrompt", () => {
         params: {
           workspaceDir: "/tmp/openclaw",
           userTimezone: "America/Chicago",
-          userTime: "Monday, January 5th, 2026 — 3:26 PM",
+          userTime: "Monday, January 5th, 2026 â€” 3:26 PM",
           userTimeFormat: "12" as const,
         },
       },
@@ -376,7 +387,7 @@ describe("buildAgentSystemPrompt", () => {
         params: {
           workspaceDir: "/tmp/openclaw",
           userTimezone: "America/Chicago",
-          userTime: "Monday, January 5th, 2026 — 15:26",
+          userTime: "Monday, January 5th, 2026 â€” 15:26",
           userTimeFormat: "24" as const,
         },
       },
@@ -417,12 +428,12 @@ describe("buildAgentSystemPrompt", () => {
     const prompt = buildAgentSystemPrompt({
       workspaceDir: "/tmp/clawd",
       userTimezone: "America/Chicago",
-      userTime: "Monday, January 5th, 2026 — 3:26 PM",
+      userTime: "Monday, January 5th, 2026 â€” 3:26 PM",
       userTimeFormat: "12",
     });
 
     // The prompt should contain the timezone but NOT the formatted date/time string.
-    // This is intentional for prompt cache stability — the date/time was removed in
+    // This is intentional for prompt cache stability â€” the date/time was removed in
     // commit 66eec295b. If you're here because you want to add it back, please see
     // https://github.com/moltbot/moltbot/issues/3658 for the preferred approach:
     // gateway-level timestamp injection into messages, not the system prompt.

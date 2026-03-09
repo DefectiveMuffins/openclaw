@@ -76,6 +76,36 @@ Use `sessions_spawn`:
 - Default thinking: inherits the caller unless you set `agents.defaults.subagents.thinking` (or per-agent `agents.list[].subagents.thinking`); an explicit `sessions_spawn.thinking` still wins.
 - Default run timeout: if `sessions_spawn.runTimeoutSeconds` is omitted, OpenClaw uses `agents.defaults.subagents.runTimeoutSeconds` when set; otherwise it falls back to `0` (no timeout).
 
+### Hard delegation mode (manager/worker)
+
+You can enforce a strict manager/worker turn at depth 0 via `agents.defaults.subagents.delegation`:
+
+```json5
+{
+  agents: {
+    defaults: {
+      subagents: {
+        delegation: {
+          mode: "hard", // off | soft | hard
+          scope: "all", // all | action_only
+        },
+      },
+    },
+  },
+}
+```
+
+Behavior in `mode: "hard"` (top-level requester sessions only):
+
+- The parent becomes a strict **manager** and is forced onto the `manager` tool profile (planning/context/session tools only: `read`, `memory_search`, `memory_get`, `agents_list`, `sessions_list`, `sessions_history`, `sessions_spawn`, `subagents`, `session_status`).
+- Direct execution/mutation/messaging tools are hidden at the top level (`write`, `edit`, `apply_patch`, `exec`, `process`, `browser`, `canvas`, `sessions_send`, `message`).
+- Runtime enforcement uses a deterministic flow: `planning -> waiting_for_workers -> synthesis`.
+- The parent only unblocks synthesis after at least one typed `task_completion` event from a child spawned in the current turn.
+- `task_completion` with `ok`, `error`, or `timeout` all satisfy the join so the parent can report cleanly instead of hanging.
+- Join gating is driven by typed internal events from announce/runtime plumbing, not freeform announce text parsing.
+
+`mode: "soft"` keeps the existing retry-style enforcement. `mode: "off"` disables forced delegation.
+
 Tool params:
 
 - `task` (required)
@@ -143,7 +173,7 @@ Auto-archive:
 
 ## Nested Sub-Agents
 
-By default, sub-agents cannot spawn their own sub-agents (`maxSpawnDepth: 1`). You can enable one level of nesting by setting `maxSpawnDepth: 2`, which allows the **orchestrator pattern**: main → orchestrator sub-agent → worker sub-sub-agents.
+By default, sub-agents cannot spawn their own sub-agents (`maxSpawnDepth: 1`). You can enable one level of nesting by setting `maxSpawnDepth: 2`, which allows the **orchestrator pattern**: main -> orchestrator sub-agent -> worker sub-sub-agents.
 
 ### How to enable
 
@@ -174,8 +204,8 @@ By default, sub-agents cannot spawn their own sub-agents (`maxSpawnDepth: 1`). Y
 
 Results flow back up the chain:
 
-1. Depth-2 worker finishes → announces to its parent (depth-1 orchestrator)
-2. Depth-1 orchestrator receives the announce, synthesizes results, finishes → announces to main
+1. Depth-2 worker finishes -> announces to its parent (depth-1 orchestrator)
+2. Depth-1 orchestrator receives the announce, synthesizes results, finishes -> announces to main
 3. Main agent receives the announce and delivers to the user
 
 Each level only sees announces from its direct children.
@@ -184,7 +214,7 @@ Each level only sees announces from its direct children.
 
 - **Depth 1 (orchestrator, when `maxSpawnDepth >= 2`)**: Gets `sessions_spawn`, `subagents`, `sessions_list`, `sessions_history` so it can manage its children. Other session/system tools remain denied.
 - **Depth 1 (leaf, when `maxSpawnDepth == 1`)**: No session tools (current default behavior).
-- **Depth 2 (leaf worker)**: No session tools — `sessions_spawn` is always denied at depth 2. Cannot spawn further children.
+- **Depth 2 (leaf worker)**: No session tools -- `sessions_spawn` is always denied at depth 2. Cannot spawn further children.
 
 ### Per-agent spawn limit
 
@@ -286,5 +316,5 @@ Sub-agents use a dedicated in-process queue lane:
 - Sub-agents still share the same gateway process resources; treat `maxConcurrent` as a safety valve.
 - `sessions_spawn` is always non-blocking: it returns `{ status: "accepted", runId, childSessionKey }` immediately.
 - Sub-agent context only injects `AGENTS.md` + `TOOLS.md` (no `SOUL.md`, `IDENTITY.md`, `USER.md`, `HEARTBEAT.md`, or `BOOTSTRAP.md`).
-- Maximum nesting depth is 5 (`maxSpawnDepth` range: 1–5). Depth 2 is recommended for most use cases.
-- `maxChildrenPerAgent` caps active children per session (default: 5, range: 1–20).
+- Maximum nesting depth is 5 (`maxSpawnDepth` range: 1-5). Depth 2 is recommended for most use cases.
+- `maxChildrenPerAgent` caps active children per session (default: 5, range: 1-20).

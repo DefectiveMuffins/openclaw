@@ -70,6 +70,8 @@ export type RunEmbeddedPiAgentParams = {
   clientTools?: ClientToolDefinition[];
   /** Disable built-in tools for this run (LLM-only mode). */
   disableTools?: boolean;
+  /** Whether top-level delegation should be enforced for this specific turn. */
+  delegationRequired?: boolean;
   provider?: string;
   model?: string;
   /** True when an outer model-fallback wrapper has additional candidates to try. */

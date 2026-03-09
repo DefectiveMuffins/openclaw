@@ -14,6 +14,7 @@ import {
 } from "../routing/session-key.js";
 import { normalizeDeliveryContext } from "../utils/delivery-context.js";
 import { resolveAgentConfig, resolveAgentWorkspaceDir } from "./agent-scope.js";
+import { resolveTopLevelDelegationPolicy } from "./delegation-enforcement.js";
 import { AGENT_LANE_SUBAGENT } from "./lanes.js";
 import { resolveSubagentSpawnModelSelection } from "./model-selection.js";
 import { resolveSandboxRuntimeStatus } from "./sandbox/runtime-status.js";
@@ -414,11 +415,22 @@ export async function spawnSubagentDirect(
   const defaultDelegation = cfg.agents?.defaults?.subagents?.delegation;
   const delegationEnabled = defaultDelegation?.enabled ?? false;
   const structuredResultsDefault = defaultDelegation?.structuredResults ?? true;
+  const topLevelDelegationPolicy = resolveTopLevelDelegationPolicy({
+    config: cfg,
+    sessionKey: requesterInternalKey,
+    prompt: task,
+  });
+  const topLevelHardDelegation =
+    callerDepth === 0 &&
+    topLevelDelegationPolicy.mode === "hard" &&
+    topLevelDelegationPolicy.requiresDelegation;
   const deliverable = params.deliverable?.trim() || undefined;
   const acceptance = (params.acceptance ?? []).map((entry) => entry.trim()).filter(Boolean);
   const responseFormat =
     params.responseFormat ??
-    (delegationEnabled && structuredResultsDefault ? "structured" : "text");
+    (topLevelHardDelegation || (delegationEnabled && structuredResultsDefault)
+      ? "structured"
+      : "text");
   const roleTimeoutSeconds =
     role === "summarize" ? 120 : role === "verify" ? 180 : readOnly ? 240 : undefined;
   if (params.runTimeoutSeconds == null && roleTimeoutSeconds !== undefined) {

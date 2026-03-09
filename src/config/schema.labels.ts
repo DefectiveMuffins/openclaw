@@ -474,6 +474,8 @@ export const FIELD_LABELS: Record<string, string> = {
   "agents.defaults.subagents.autoTier": "Subagent Auto Tiering",
   "agents.defaults.subagents.simpleTaskModel": "Subagent Simple Task Model",
   "agents.defaults.subagents.delegation": "Subagent Delegation",
+  "agents.defaults.subagents.delegation.mode": "Subagent Delegation Mode",
+  "agents.defaults.subagents.delegation.scope": "Subagent Delegation Scope",
   "agents.defaults.subagents.delegation.enabled": "Subagent Delegation Enabled",
   "agents.defaults.subagents.delegation.structuredResults": "Subagent Structured Results",
   "agents.defaults.subagents.delegation.parallelResearch.enabled":

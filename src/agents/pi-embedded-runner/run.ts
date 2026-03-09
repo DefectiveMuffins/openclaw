@@ -24,9 +24,11 @@ import {
 } from "../context-window-guard.js";
 import { DEFAULT_CONTEXT_TOKENS, DEFAULT_MODEL, DEFAULT_PROVIDER } from "../defaults.js";
 import {
+  clearDelegationWaitingForCompletions,
   getDelegationTracking,
+  markDelegationWaitingForCompletions,
   resetDelegationTracking,
-  shouldForceTopLevelDelegation,
+  resolveTopLevelDelegationPolicy,
 } from "../delegation-enforcement.js";
 import { FailoverError, resolveFailoverStatus } from "../failover-error.js";
 import {
@@ -134,10 +136,34 @@ const BASE_RUN_RETRY_ITERATIONS = 24;
 const RUN_RETRY_ITERATIONS_PER_PROFILE = 8;
 const MIN_RUN_RETRY_ITERATIONS = 32;
 const MAX_RUN_RETRY_ITERATIONS = 160;
-const MAX_DELEGATION_RETRY_ATTEMPTS = 2;
+const MAX_SOFT_DELEGATION_RETRY_ATTEMPTS = 2;
 
-const DELEGATION_RETRY_SYSTEM_PROMPT =
+type HardDelegationPhase = "planning" | "waiting_for_workers" | "synthesis";
+
+const SOFT_DELEGATION_RETRY_SYSTEM_PROMPT =
   "Runtime enforcement: this top-level requester session must delegate the user's work to at least one subagent via sessions_spawn before any final answer. If you answered directly, correct course now: spawn a subagent, wait for its result, then synthesize.";
+
+const HARD_DELEGATION_PLANNING_SYSTEM_PROMPT =
+  "Hard delegation mode (planning): spawn at least one worker via sessions_spawn before any user-facing final answer. Gather minimal context, delegate, then wait.";
+const HARD_DELEGATION_WAITING_SYSTEM_PROMPT =
+  "Hard delegation mode (waiting_for_workers): do not send a user-facing final answer until at least one task_completion event arrives from a child spawned in this turn.";
+const HARD_DELEGATION_SYNTHESIS_SYSTEM_PROMPT =
+  "Hard delegation mode (synthesis): at least one delegated child completed. Synthesize the child completion events into the final user-visible response.";
+
+const HARD_DELEGATION_PLANNING_FEEDBACK_PROMPT =
+  "Validation: you attempted to finish without spawning a worker. Stay in planning, call sessions_spawn, and continue only after delegation is accepted.";
+const HARD_DELEGATION_WAITING_FEEDBACK_PROMPT =
+  "Validation: you attempted to finish before any worker completion. Stay in waiting_for_workers and continue once a task_completion event arrives.";
+
+function resolveHardDelegationPhasePrompt(phase: HardDelegationPhase): string {
+  if (phase === "planning") {
+    return HARD_DELEGATION_PLANNING_SYSTEM_PROMPT;
+  }
+  if (phase === "waiting_for_workers") {
+    return HARD_DELEGATION_WAITING_SYSTEM_PROMPT;
+  }
+  return HARD_DELEGATION_SYNTHESIS_SYSTEM_PROMPT;
+}
 
 function resolveMaxRunRetryIterations(profileCandidateCount: number): number {
   const scaled =
@@ -170,7 +196,7 @@ const mergeUsageIntoAccumulator = (
     (usage.input ?? 0) + (usage.output ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
   // Track the most recent API call's cache fields for accurate context-size reporting.
   // Accumulated cache totals inflate context size when there are multiple tool-call round-trips,
-  // since each call reports cacheRead ≈ current_context_size.
+  // since each call reports cacheRead ~ current_context_size.
   target.lastCacheRead = usage.cacheRead ?? 0;
   target.lastCacheWrite = usage.cacheWrite ?? 0;
   target.lastInput = usage.input ?? 0;
@@ -188,8 +214,8 @@ const toNormalizedUsage = (usage: UsageAccumulator) => {
   }
   // Use the LAST API call's cache fields for context-size calculation.
   // The accumulated cacheRead/cacheWrite inflate context size because each tool-call
-  // round-trip reports cacheRead ≈ current_context_size, and summing N calls gives
-  // N × context_size which gets clamped to contextWindow (e.g. 200k).
+  // round-trip reports cacheRead ~ current_context_size, and summing N calls gives
+  // N x context_size which gets clamped to contextWindow (e.g. 200k).
   // See: https://github.com/openclaw/openclaw/issues/13698
   //
   // We use lastInput/lastCacheRead/lastCacheWrite (from the most recent API call) for
@@ -737,20 +763,40 @@ export async function runEmbeddedPiAgent(
         }
       };
 
+      const delegationPolicy = resolveTopLevelDelegationPolicy({
+        config: params.config,
+        sessionKey: params.sessionKey,
+        prompt: params.prompt,
+      });
+      const delegationRequired = delegationPolicy.requiresDelegation;
+      const softDelegationEnforced = delegationPolicy.mode === "soft" && delegationRequired;
+      const hardDelegationEnforced = delegationPolicy.mode === "hard" && delegationRequired;
+
       const MAX_OVERFLOW_COMPACTION_ATTEMPTS = 3;
-      const MAX_RUN_LOOP_ITERATIONS = resolveMaxRunRetryIterations(profileCandidates.length);
+      const MAX_RUN_LOOP_ITERATIONS = hardDelegationEnforced
+        ? Math.max(resolveMaxRunRetryIterations(profileCandidates.length), 640)
+        : resolveMaxRunRetryIterations(profileCandidates.length);
       let overflowCompactionAttempts = 0;
       let toolResultTruncationAttempted = false;
       const usageAccumulator = createUsageAccumulator();
       let lastRunPromptUsage: ReturnType<typeof normalizeUsage> | undefined;
       let autoCompactionCount = 0;
       let runLoopIterations = 0;
-      let delegationRetryAttempts = 0;
-      const delegationRequired = shouldForceTopLevelDelegation(params.sessionKey);
-      resetDelegationTracking({
-        sessionKey: params.sessionKey,
-        sessionId: params.sessionId,
-      });
+      let softDelegationRetryAttempts = 0;
+      let hardDelegationPhase: HardDelegationPhase = hardDelegationEnforced
+        ? "planning"
+        : "synthesis";
+      let hardDelegationValidationFeedback: string | undefined;
+      const hardDelegationJoinDeadlineMs = hardDelegationEnforced
+        ? started + Math.max(1, params.timeoutMs)
+        : undefined;
+
+      if (delegationRequired) {
+        resetDelegationTracking({
+          sessionKey: params.sessionKey,
+          sessionId: params.sessionId,
+        });
+      }
       const maybeMarkAuthProfileFailure = async (failure: {
         profileId?: string;
         reason?: Parameters<typeof markAuthProfileFailure>[0]["reason"] | null;
@@ -809,12 +855,57 @@ export async function runEmbeddedPiAgent(
 
           const prompt =
             provider === "anthropic" ? scrubAnthropicRefusalMagic(params.prompt) : params.prompt;
+
+          let hardDelegationMatchedBeforeAttempt = 0;
+          if (hardDelegationEnforced) {
+            const delegationStateBeforeAttempt = getDelegationTracking({
+              sessionKey: params.sessionKey,
+              sessionId: params.sessionId,
+            });
+            if (
+              hardDelegationPhase === "planning" &&
+              delegationStateBeforeAttempt.spawnedSubagentCount > 0
+            ) {
+              markDelegationWaitingForCompletions(
+                {
+                  sessionKey: params.sessionKey,
+                  sessionId: params.sessionId,
+                },
+                delegationStateBeforeAttempt.childSessionKeys,
+              );
+              hardDelegationPhase = "waiting_for_workers";
+            }
+
+            if (hardDelegationPhase === "waiting_for_workers") {
+              const waitingState = getDelegationTracking({
+                sessionKey: params.sessionKey,
+                sessionId: params.sessionId,
+              });
+              hardDelegationMatchedBeforeAttempt = waitingState.matchedCompletionCount;
+              if (waitingState.matchedCompletionCount > 0) {
+                clearDelegationWaitingForCompletions({
+                  sessionKey: params.sessionKey,
+                  sessionId: params.sessionId,
+                });
+                hardDelegationPhase = "synthesis";
+                hardDelegationValidationFeedback = HARD_DELEGATION_SYNTHESIS_SYSTEM_PROMPT;
+              }
+            }
+          }
+
+          const delegationPromptParts = [
+            params.extraSystemPrompt,
+            softDelegationEnforced && softDelegationRetryAttempts > 0
+              ? SOFT_DELEGATION_RETRY_SYSTEM_PROMPT
+              : undefined,
+            hardDelegationEnforced
+              ? resolveHardDelegationPhasePrompt(hardDelegationPhase)
+              : undefined,
+            hardDelegationValidationFeedback,
+          ].filter((value): value is string => Boolean(value?.trim()));
           const effectiveExtraSystemPrompt =
-            delegationRequired && delegationRetryAttempts > 0
-              ? [params.extraSystemPrompt, DELEGATION_RETRY_SYSTEM_PROMPT]
-                  .filter((value): value is string => Boolean(value?.trim()))
-                  .join("\n\n")
-              : params.extraSystemPrompt;
+            delegationPromptParts.length > 0 ? delegationPromptParts.join("\n\n") : undefined;
+          hardDelegationValidationFeedback = undefined;
 
           const attempt = await runEmbeddedAttempt({
             sessionId: params.sessionId,
@@ -842,6 +933,7 @@ export async function runEmbeddedPiAgent(
             prompt,
             images: params.images,
             disableTools: params.disableTools,
+            delegationRequired: delegationRequired,
             provider,
             modelId,
             model,
@@ -904,19 +996,134 @@ export async function runEmbeddedPiAgent(
                 sessionKey: params.sessionKey,
                 sessionId: params.sessionId,
               })
-            : { spawnedSubagentCount: 0, childSessionKeys: [] };
+            : {
+                spawnedSubagentCount: 0,
+                childSessionKeys: [],
+                waitingForCompletions: false,
+                expectedChildSessionKeys: [],
+                completedChildSessionKeys: [],
+                matchedCompletionCount: 0,
+              };
+          const delegationChecksAllowed = !promptError && !aborted && !timedOut;
+
+          if (hardDelegationEnforced && delegationChecksAllowed) {
+            if (hardDelegationPhase === "planning") {
+              if (delegationState.spawnedSubagentCount <= 0) {
+                hardDelegationValidationFeedback = HARD_DELEGATION_PLANNING_FEEDBACK_PROMPT;
+                log.warn(
+                  `[delegation-enforcement] sessionKey=${params.sessionKey ?? params.sessionId} ` +
+                    `provider=${provider}/${modelId} phase=planning violation=no_subagent_spawn`,
+                );
+                continue;
+              }
+
+              markDelegationWaitingForCompletions(
+                {
+                  sessionKey: params.sessionKey,
+                  sessionId: params.sessionId,
+                },
+                delegationState.childSessionKeys,
+              );
+              hardDelegationPhase = "waiting_for_workers";
+
+              const waitingState = getDelegationTracking({
+                sessionKey: params.sessionKey,
+                sessionId: params.sessionId,
+              });
+              if (waitingState.matchedCompletionCount <= 0) {
+                if (
+                  hardDelegationJoinDeadlineMs !== undefined &&
+                  Date.now() >= hardDelegationJoinDeadlineMs
+                ) {
+                  return {
+                    payloads: [
+                      {
+                        text: "Request timed out while waiting for delegated worker completion. Please try again.",
+                        isError: true,
+                      },
+                    ],
+                    meta: {
+                      durationMs: Date.now() - started,
+                      agentMeta: {
+                        sessionId: params.sessionId,
+                        provider,
+                        model: model.id,
+                      },
+                      error: {
+                        kind: "retry_limit",
+                        message:
+                          "Hard delegation join timed out waiting for task_completion events.",
+                      },
+                    },
+                  };
+                }
+                hardDelegationValidationFeedback = HARD_DELEGATION_WAITING_FEEDBACK_PROMPT;
+                continue;
+              }
+
+              clearDelegationWaitingForCompletions({
+                sessionKey: params.sessionKey,
+                sessionId: params.sessionId,
+              });
+              hardDelegationPhase = "synthesis";
+              if (hardDelegationMatchedBeforeAttempt <= 0) {
+                hardDelegationValidationFeedback = HARD_DELEGATION_SYNTHESIS_SYSTEM_PROMPT;
+                continue;
+              }
+            } else if (hardDelegationPhase === "waiting_for_workers") {
+              if (delegationState.matchedCompletionCount <= 0) {
+                if (
+                  hardDelegationJoinDeadlineMs !== undefined &&
+                  Date.now() >= hardDelegationJoinDeadlineMs
+                ) {
+                  return {
+                    payloads: [
+                      {
+                        text: "Request timed out while waiting for delegated worker completion. Please try again.",
+                        isError: true,
+                      },
+                    ],
+                    meta: {
+                      durationMs: Date.now() - started,
+                      agentMeta: {
+                        sessionId: params.sessionId,
+                        provider,
+                        model: model.id,
+                      },
+                      error: {
+                        kind: "retry_limit",
+                        message:
+                          "Hard delegation join timed out waiting for task_completion events.",
+                      },
+                    },
+                  };
+                }
+                hardDelegationValidationFeedback = HARD_DELEGATION_WAITING_FEEDBACK_PROMPT;
+                continue;
+              }
+
+              clearDelegationWaitingForCompletions({
+                sessionKey: params.sessionKey,
+                sessionId: params.sessionId,
+              });
+              hardDelegationPhase = "synthesis";
+              if (hardDelegationMatchedBeforeAttempt <= 0) {
+                hardDelegationValidationFeedback = HARD_DELEGATION_SYNTHESIS_SYSTEM_PROMPT;
+                continue;
+              }
+            }
+          }
+
           if (
-            delegationRequired &&
+            softDelegationEnforced &&
             delegationState.spawnedSubagentCount <= 0 &&
-            !promptError &&
-            !aborted &&
-            !timedOut
+            delegationChecksAllowed
           ) {
-            if (delegationRetryAttempts < MAX_DELEGATION_RETRY_ATTEMPTS) {
-              delegationRetryAttempts += 1;
+            if (softDelegationRetryAttempts < MAX_SOFT_DELEGATION_RETRY_ATTEMPTS) {
+              softDelegationRetryAttempts += 1;
               log.warn(
                 `[delegation-enforcement] sessionKey=${params.sessionKey ?? params.sessionId} ` +
-                  `provider=${provider}/${modelId} retry=${delegationRetryAttempts} ` +
+                  `provider=${provider}/${modelId} retry=${softDelegationRetryAttempts} ` +
                   `reason=no_subagent_spawn`,
               );
               continue;
@@ -1087,7 +1294,7 @@ export async function runEmbeddedPiAgent(
                   log.info(
                     `[context-overflow-recovery] Truncated ${truncResult.truncatedCount} tool result(s); retrying prompt`,
                   );
-                  // Do NOT reset overflowCompactionAttempts here — the global cap must remain
+                  // Do NOT reset overflowCompactionAttempts here -- the global cap must remain
                   // enforced across all iterations to prevent unbounded compaction cycles (OC-65).
                   continue;
                 }
@@ -1481,3 +1688,4 @@ export async function runEmbeddedPiAgent(
     }),
   );
 }
+

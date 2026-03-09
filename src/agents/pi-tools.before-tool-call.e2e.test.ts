@@ -171,6 +171,10 @@ describe("before_tool_call loop detection behavior", () => {
     ).toEqual({
       spawnedSubagentCount: 1,
       childSessionKeys: ["agent:main:subagent:child-1"],
+      waitingForCompletions: false,
+      expectedChildSessionKeys: [],
+      completedChildSessionKeys: [],
+      matchedCompletionCount: 0,
     });
   });
   it("blocks known poll loops when no progress repeats", async () => {

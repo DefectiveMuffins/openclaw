@@ -83,6 +83,8 @@ const TAG_OVERRIDES: Record<string, ConfigTag[]> = {
   "agents.defaults.subagents.autoTier": ["tools", "models", "performance"],
   "agents.defaults.subagents.simpleTaskModel": ["tools", "models", "performance"],
   "agents.defaults.subagents.delegation": ["tools", "models", "performance"],
+  "agents.defaults.subagents.delegation.mode": ["tools", "models", "performance"],
+  "agents.defaults.subagents.delegation.scope": ["tools", "models", "performance"],
   "agents.defaults.subagents.delegation.enabled": ["tools", "models", "performance"],
   "agents.defaults.subagents.delegation.structuredResults": ["tools", "models", "performance"],
   "agents.defaults.subagents.delegation.parallelResearch.enabled": [

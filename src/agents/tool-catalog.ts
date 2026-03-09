@@ -1,4 +1,10 @@
-export type ToolProfileId = "minimal" | "coding" | "messaging" | "orchestrator" | "full";
+export type ToolProfileId =
+  | "minimal"
+  | "coding"
+  | "messaging"
+  | "orchestrator"
+  | "manager"
+  | "full";
 
 type ToolProfilePolicy = {
   allow?: string[];
@@ -44,7 +50,7 @@ const CORE_TOOL_DEFINITIONS: CoreToolDefinition[] = [
     label: "read",
     description: "Read file contents",
     sectionId: "fs",
-    profiles: ["coding", "orchestrator"],
+    profiles: ["coding", "orchestrator", "manager"],
   },
   {
     id: "write",
@@ -102,7 +108,7 @@ const CORE_TOOL_DEFINITIONS: CoreToolDefinition[] = [
     label: "memory_search",
     description: "Semantic search",
     sectionId: "memory",
-    profiles: ["coding", "orchestrator"],
+    profiles: ["coding", "orchestrator", "manager"],
     includeInOpenClawGroup: true,
   },
   {
@@ -110,7 +116,7 @@ const CORE_TOOL_DEFINITIONS: CoreToolDefinition[] = [
     label: "memory_get",
     description: "Read memory files",
     sectionId: "memory",
-    profiles: ["coding", "orchestrator"],
+    profiles: ["coding", "orchestrator", "manager"],
     includeInOpenClawGroup: true,
   },
   {
@@ -118,7 +124,7 @@ const CORE_TOOL_DEFINITIONS: CoreToolDefinition[] = [
     label: "sessions_list",
     description: "List sessions",
     sectionId: "sessions",
-    profiles: ["coding", "messaging", "orchestrator"],
+    profiles: ["coding", "messaging", "orchestrator", "manager"],
     includeInOpenClawGroup: true,
   },
   {
@@ -126,7 +132,7 @@ const CORE_TOOL_DEFINITIONS: CoreToolDefinition[] = [
     label: "sessions_history",
     description: "Session history",
     sectionId: "sessions",
-    profiles: ["coding", "messaging", "orchestrator"],
+    profiles: ["coding", "messaging", "orchestrator", "manager"],
     includeInOpenClawGroup: true,
   },
   {
@@ -142,7 +148,7 @@ const CORE_TOOL_DEFINITIONS: CoreToolDefinition[] = [
     label: "sessions_spawn",
     description: "Spawn sub-agent",
     sectionId: "sessions",
-    profiles: ["coding", "orchestrator"],
+    profiles: ["coding", "orchestrator", "manager"],
     includeInOpenClawGroup: true,
   },
   {
@@ -150,7 +156,7 @@ const CORE_TOOL_DEFINITIONS: CoreToolDefinition[] = [
     label: "subagents",
     description: "Manage sub-agents",
     sectionId: "sessions",
-    profiles: ["coding", "orchestrator"],
+    profiles: ["coding", "orchestrator", "manager"],
     includeInOpenClawGroup: true,
   },
   {
@@ -158,7 +164,7 @@ const CORE_TOOL_DEFINITIONS: CoreToolDefinition[] = [
     label: "session_status",
     description: "Session status",
     sectionId: "sessions",
-    profiles: ["minimal", "coding", "messaging", "orchestrator"],
+    profiles: ["minimal", "coding", "messaging", "orchestrator", "manager"],
     includeInOpenClawGroup: true,
   },
   {
@@ -214,7 +220,7 @@ const CORE_TOOL_DEFINITIONS: CoreToolDefinition[] = [
     label: "agents_list",
     description: "List agents",
     sectionId: "agents",
-    profiles: ["orchestrator"],
+    profiles: ["orchestrator", "manager"],
     includeInOpenClawGroup: true,
   },
   {
@@ -258,6 +264,9 @@ const CORE_TOOL_PROFILES: Record<ToolProfileId, ToolProfilePolicy> = {
   orchestrator: {
     allow: listCoreToolIdsForProfile("orchestrator"),
   },
+  manager: {
+    allow: listCoreToolIdsForProfile("manager"),
+  },
   full: {},
 };
 
@@ -285,6 +294,7 @@ export const PROFILE_OPTIONS = [
   { id: "coding", label: "Coding" },
   { id: "messaging", label: "Messaging" },
   { id: "orchestrator", label: "Orchestrator" },
+  { id: "manager", label: "Manager" },
   { id: "full", label: "Full" },
 ] as const;
 
