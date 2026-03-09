@@ -151,6 +151,7 @@ export function resolveModelFallbackOptions(run: FollowupRun["run"]) {
     provider: run.provider,
     model: run.model,
     agentDir: run.agentDir,
+    hostedRoutingEligible: run.hostedRoutingEligible,
     fallbacksOverride: resolveRunModelFallbacksOverride({
       cfg: run.config,
       agentId: run.agentId,

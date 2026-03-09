@@ -33,7 +33,7 @@ For model selection rules, see [/concepts/models](/concepts/models).
 
 ## Built-in providers (pi-ai catalog)
 
-OpenClaw ships with the pi‑ai catalog. These providers require **no**
+OpenClaw ships with the piâ€‘ai catalog. These providers require **no**
 `models.providers` config; just set auth + pick a model.
 
 ### OpenAI
@@ -103,14 +103,11 @@ OpenClaw ships with the pi‑ai catalog. These providers require **no**
 - Example model: `google/gemini-3-pro-preview`
 - CLI: `openclaw onboard --auth-choice gemini-api-key`
 
-### Google Vertex, Antigravity, and Gemini CLI
+### Google Vertex and Gemini CLI
 
-- Providers: `google-vertex`, `google-antigravity`, `google-gemini-cli`
-- Auth: Vertex uses gcloud ADC; Antigravity/Gemini CLI use their respective auth flows
-- Caution: Antigravity and Gemini CLI OAuth in OpenClaw are unofficial integrations. Some users have reported Google account restrictions after using third-party clients. Review Google terms and use a non-critical account if you choose to proceed.
-- Antigravity OAuth is shipped as a bundled plugin (`google-antigravity-auth`, disabled by default).
-  - Enable: `openclaw plugins enable google-antigravity-auth`
-  - Login: `openclaw models auth login --provider google-antigravity --set-default`
+- Providers: `google-vertex`, `google`, `google-gemini-cli`
+- Auth: Vertex uses gcloud ADC; `google` uses `GEMINI_API_KEY`; Gemini CLI uses its device/OAuth flow
+- Caution: Gemini CLI OAuth in OpenClaw is an unofficial integration. Some users have reported Google account restrictions after using third-party clients. Review Google terms and use a non-critical account if you choose to proceed.
 - Gemini CLI OAuth is shipped as a bundled plugin (`google-gemini-cli-auth`, disabled by default).
   - Enable: `openclaw plugins enable google-gemini-cli-auth`
   - Login: `openclaw models auth login --provider google-gemini-cli --set-default`
@@ -158,12 +155,12 @@ See [/providers/kilocode](/providers/kilocode) for setup details.
   - GLM models on Cerebras use ids `zai-glm-4.7` and `zai-glm-4.6`.
   - OpenAI-compatible base URL: `https://api.cerebras.ai/v1`.
 - GitHub Copilot: `github-copilot` (`COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN`)
-- Hugging Face Inference: `huggingface` (`HUGGINGFACE_HUB_TOKEN` or `HF_TOKEN`) — OpenAI-compatible router; example model: `huggingface/deepseek-ai/DeepSeek-R1`; CLI: `openclaw onboard --auth-choice huggingface-api-key`. See [Hugging Face (Inference)](/providers/huggingface).
+- Hugging Face Inference: `huggingface` (`HUGGINGFACE_HUB_TOKEN` or `HF_TOKEN`) â€” OpenAI-compatible router; example model: `huggingface/deepseek-ai/DeepSeek-R1`; CLI: `openclaw onboard --auth-choice huggingface-api-key`. See [Hugging Face (Inference)](/providers/huggingface).
 
 ## Providers via `models.providers` (custom/base URL)
 
 Use `models.providers` (or `models.json`) to add **custom** providers or
-OpenAI/Anthropic‑compatible proxies.
+OpenAI/Anthropicâ€‘compatible proxies.
 
 ### Moonshot AI (Kimi)
 
@@ -239,7 +236,7 @@ See [/providers/qwen](/providers/qwen) for setup details and notes.
 
 ### Volcano Engine (Doubao)
 
-Volcano Engine (火山引擎) provides access to Doubao and other models in China.
+Volcano Engine (ç«å±±å¼•æ“Ž) provides access to Doubao and other models in China.
 
 - Provider: `volcengine` (coding: `volcengine-plan`)
 - Auth: `VOLCANO_ENGINE_API_KEY`
@@ -333,7 +330,7 @@ Synthetic provides Anthropic-compatible models behind the `synthetic` provider:
 
 MiniMax is configured via `models.providers` because it uses custom endpoints:
 
-- MiniMax (Anthropic‑compatible): `--auth-choice minimax-api`
+- MiniMax (Anthropicâ€‘compatible): `--auth-choice minimax-api`
 - Auth: `MINIMAX_API_KEY`
 
 See [/providers/minimax](/providers/minimax) for setup details, model options, and config snippets.
@@ -370,7 +367,7 @@ vLLM is a local (or self-hosted) OpenAI-compatible server:
 - Auth: Optional (depends on your server)
 - Default base URL: `http://127.0.0.1:8000/v1`
 
-To opt in to auto-discovery locally (any value works if your server doesn’t enforce auth):
+To opt in to auto-discovery locally (any value works if your server doesnâ€™t enforce auth):
 
 ```bash
 export VLLM_API_KEY="vllm-local"
@@ -390,7 +387,7 @@ See [/providers/vllm](/providers/vllm) for details.
 
 ### Local proxies (LM Studio, vLLM, LiteLLM, etc.)
 
-Example (OpenAI‑compatible):
+Example (OpenAIâ€‘compatible):
 
 ```json5
 {

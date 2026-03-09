@@ -1,5 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
-import { discoverProviderModels, loadAgentModelChoices, loadToolsCatalog } from "./agents.ts";
+﻿import { describe, expect, it, vi } from "vitest";
+import {
+  discoverProviderModels,
+  loadAgentModelChoices,
+  loadHostedProviders,
+  loadToolsCatalog,
+  moveHostedRoutingProvider,
+  startHostedProviderAuth,
+  updateHostedRoutingMode,
+  updateHostedRoutingProviderEnabled,
+} from "./agents.ts";
 import type { AgentsState } from "./agents.ts";
 
 function createState(): { state: AgentsState; request: ReturnType<typeof vi.fn> } {
@@ -46,6 +55,16 @@ function createState(): { state: AgentsState; request: ReturnType<typeof vi.fn> 
     toolsCatalogLoading: false,
     toolsCatalogError: null,
     toolsCatalogResult: null,
+    hostedProvidersLoading: false,
+    hostedProvidersError: null,
+    hostedProvidersResult: null,
+    hostedProvidersNotice: null,
+    hostedProviderAuthBusy: false,
+    hostedProviderAuthError: null,
+    hostedProviderAuthProviderId: null,
+    hostedProviderAuthSessionId: null,
+    hostedProviderAuthStep: null,
+    hostedProviderAuthValue: null,
   };
   return { state, request };
 }
@@ -150,6 +169,67 @@ describe("discoverProviderModels", () => {
   });
 });
 
+describe("updateHostedRoutingMode", () => {
+  it("opts into hosted rotation while preserving configured order", () => {
+    const { state } = createState();
+    state.configForm = {
+      agents: {
+        defaults: {
+          hostedRouting: {
+            enabled: false,
+            providerOrder: ["google", "qwen-portal"],
+            appendConfiguredModels: false,
+          },
+        },
+      },
+    };
+
+    updateHostedRoutingMode(state, "prefer-hosted");
+
+    expect(state.configForm).toMatchObject({
+      agents: {
+        defaults: {
+          hostedRouting: {
+            enabled: true,
+            mode: "prefer-hosted",
+            providerOrder: ["google", "qwen-portal"],
+            appendConfiguredModels: false,
+          },
+        },
+      },
+    });
+    expect(state.configFormDirty).toBe(true);
+  });
+
+  it("turns hosted rotation off without dropping the existing mode metadata", () => {
+    const { state } = createState();
+    state.configForm = {
+      agents: {
+        defaults: {
+          hostedRouting: {
+            enabled: true,
+            mode: "hosted-only",
+            providerOrder: ["moonshot"],
+          },
+        },
+      },
+    };
+
+    updateHostedRoutingMode(state, "off");
+
+    expect(state.configForm).toMatchObject({
+      agents: {
+        defaults: {
+          hostedRouting: {
+            enabled: false,
+            mode: "hosted-only",
+            providerOrder: ["moonshot"],
+          },
+        },
+      },
+    });
+  });
+});
 describe("loadToolsCatalog", () => {
   it("loads catalog and stores result", async () => {
     const { state, request } = createState();
@@ -189,3 +269,117 @@ describe("loadToolsCatalog", () => {
     expect(state.toolsCatalogLoading).toBe(false);
   });
 });
+
+describe("loadHostedProviders", () => {
+  it("loads hosted provider status for the control UI", async () => {
+    const { state, request } = createState();
+    request.mockResolvedValue({
+      enabled: false,
+      mode: "prefer-hosted",
+      configuredOrder: [],
+      effectiveOrder: ["google", "qwen-portal"],
+      appendConfiguredModels: true,
+      providers: [
+        {
+          provider: "google",
+          label: "Google Gemini",
+          modelRef: "google/gemini-3-pro-preview",
+          authMode: "api-key",
+          riskLabel: "official",
+          docsUrl: "https://docs.openclaw.ai/providers/google",
+          optInOnly: false,
+          available: false,
+          skipReasons: ["no auth"],
+        },
+      ],
+    });
+
+    await loadHostedProviders(state);
+
+    expect(request).toHaveBeenCalledWith("models.hostedProviders", {});
+    expect(state.hostedProvidersResult?.providers[0]?.provider).toBe("google");
+    expect(state.hostedProvidersError).toBeNull();
+  });
+});
+
+describe("hosted routing provider order", () => {
+  it("adds and removes providers from the draft order", () => {
+    const { state } = createState();
+    state.hostedProvidersResult = {
+      enabled: false,
+      mode: "prefer-hosted",
+      configuredOrder: [],
+      effectiveOrder: ["google", "qwen-portal"],
+      appendConfiguredModels: true,
+      providers: [],
+    };
+
+    updateHostedRoutingProviderEnabled(state, "moonshot", true);
+    updateHostedRoutingProviderEnabled(state, "google", false);
+
+    expect(state.configForm).toMatchObject({
+      agents: {
+        defaults: {
+          hostedRouting: {
+            providerOrder: ["qwen-portal", "moonshot"],
+          },
+        },
+      },
+    });
+  });
+
+  it("reorders selected hosted providers in the draft", () => {
+    const { state } = createState();
+    state.configForm = {
+      agents: {
+        defaults: {
+          hostedRouting: {
+            providerOrder: ["google", "qwen-portal", "moonshot"],
+          },
+        },
+      },
+    };
+
+    moveHostedRoutingProvider(state, "moonshot", "up");
+
+    expect(state.configForm).toMatchObject({
+      agents: {
+        defaults: {
+          hostedRouting: {
+            providerOrder: ["google", "moonshot", "qwen-portal"],
+          },
+        },
+      },
+    });
+  });
+});
+
+describe("startHostedProviderAuth", () => {
+  it("starts a provider auth wizard from the UI", async () => {
+    const { state, request } = createState();
+    request.mockResolvedValue({
+      sessionId: "wiz-1",
+      done: false,
+      status: "running",
+      step: {
+        id: "step-1",
+        type: "text",
+        title: "Enter key",
+        message: "Enter API key",
+        sensitive: true,
+      },
+    });
+
+    const status = await startHostedProviderAuth(state, "google");
+
+    expect(status).toBe("running");
+    expect(request).toHaveBeenCalledWith("wizard.start", {
+      kind: "hosted-provider-auth",
+      providerId: "google",
+    });
+    expect(state.hostedProviderAuthSessionId).toBe("wiz-1");
+    expect(state.hostedProviderAuthStep?.type).toBe("text");
+    expect(state.hostedProviderAuthProviderId).toBe("google");
+  });
+});
+

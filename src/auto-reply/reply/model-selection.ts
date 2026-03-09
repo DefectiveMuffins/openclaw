@@ -32,6 +32,7 @@ type ModelSelectionState = {
   allowedModelKeys: Set<string>;
   allowedModelCatalog: ModelCatalog;
   resetModelOverride: boolean;
+  usedStoredModelOverride: boolean;
   resolveDefaultThinkingLevel: () => Promise<ThinkLevel>;
   /** Default reasoning level from model capability: "on" if model has reasoning, else "off". */
   resolveDefaultReasoningLevel: () => Promise<"on" | "off">;
@@ -349,6 +350,7 @@ export async function createModelSelectionState(params: {
     sessionKey,
     parentSessionKey,
   });
+  let usedStoredModelOverride = false;
   // Skip stored session model override only when an explicit heartbeat.model
   // was resolved. Heartbeat runs without heartbeat.model should still inherit
   // the regular session/parent model override behavior.
@@ -359,6 +361,7 @@ export async function createModelSelectionState(params: {
     if (allowedModelKeys.size === 0 || allowedModelKeys.has(key)) {
       provider = candidateProvider;
       model = storedOverride.model;
+      usedStoredModelOverride = true;
     }
   }
 
@@ -419,6 +422,7 @@ export async function createModelSelectionState(params: {
     allowedModelKeys,
     allowedModelCatalog,
     resetModelOverride,
+    usedStoredModelOverride,
     resolveDefaultThinkingLevel,
     resolveDefaultReasoningLevel,
     needsModelCatalog,

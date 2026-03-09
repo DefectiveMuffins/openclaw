@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+﻿import { randomUUID } from "node:crypto";
 import { WizardCancelledError, type WizardProgress, type WizardPrompter } from "./prompts.js";
 
 export type WizardStepOption = {
@@ -111,6 +111,7 @@ class WizardSessionPrompter implements WizardPrompter {
     message: string;
     initialValue?: string;
     placeholder?: string;
+    sensitive?: boolean;
     validate?: (value: string) => string | undefined;
   }): Promise<string> {
     const res = await this.prompt({
@@ -118,6 +119,7 @@ class WizardSessionPrompter implements WizardPrompter {
       message: params.message,
       initialValue: params.initialValue,
       placeholder: params.placeholder,
+      sensitive: params.sensitive,
       executor: "client",
     });
     const value =
@@ -262,3 +264,4 @@ export class WizardSession {
     return this.error;
   }
 }
+

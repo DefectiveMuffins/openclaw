@@ -381,6 +381,7 @@ export async function getReplyFromConfig(
     opts: resolvedOpts,
     defaultProvider,
     defaultModel,
+    hasResolvedHeartbeatModelOverride,
     timeoutMs,
     isNewSession,
     resetTriggered,

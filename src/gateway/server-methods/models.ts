@@ -1,11 +1,13 @@
 import { DEFAULT_PROVIDER } from "../../agents/defaults.js";
 import { buildAllowedModelSet } from "../../agents/model-selection.js";
 import { loadConfig, type OpenClawConfig } from "../../config/config.js";
+import { loadHostedProvidersForUi } from "../hosted-provider-auth.js";
 import {
   ErrorCodes,
   errorShape,
   formatValidationErrors,
   validateModelsDiscoverProviderParams,
+  validateModelsHostedProvidersParams,
   validateModelsListParams,
 } from "../protocol/index.js";
 import type { GatewayRequestHandlers } from "./types.js";
@@ -181,6 +183,25 @@ export const modelsHandlers: GatewayRequestHandlers = {
       });
       const models = includeAll ? catalog : allowedCatalog.length > 0 ? allowedCatalog : catalog;
       respond(true, { models }, undefined);
+    } catch (err) {
+      respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
+    }
+  },
+  "models.hostedProviders": async ({ params, respond }) => {
+    if (!validateModelsHostedProvidersParams(params)) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          `invalid models.hostedProviders params: ${formatValidationErrors(validateModelsHostedProvidersParams.errors)}`,
+        ),
+      );
+      return;
+    }
+
+    try {
+      respond(true, await loadHostedProvidersForUi(), undefined);
     } catch (err) {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, String(err)));
     }

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { defaultRuntime } from "../../runtime.js";
 import { WizardSession } from "../../wizard/session.js";
+import { createHostedProviderAuthSession } from "../hosted-provider-auth.js";
 import {
   ErrorCodes,
   errorShape,
@@ -44,13 +45,38 @@ export const wizardHandlers: GatewayRequestHandlers = {
       return;
     }
     const sessionId = randomUUID();
-    const opts = {
-      mode: params.mode,
-      workspace: typeof params.workspace === "string" ? params.workspace : undefined,
-    };
-    const session = new WizardSession((prompter) =>
-      context.wizardRunner(opts, defaultRuntime, prompter),
-    );
+    const kind =
+      params.kind === "hosted-provider-auth" ? "hosted-provider-auth" : "onboarding";
+    const session =
+      kind === "hosted-provider-auth"
+        ? (() => {
+            const providerId =
+              typeof params.providerId === "string" ? params.providerId.trim() : "";
+            if (!providerId) {
+              respond(
+                false,
+                undefined,
+                errorShape(
+                  ErrorCodes.INVALID_REQUEST,
+                  "providerId is required for hosted-provider-auth wizards",
+                ),
+              );
+              return null;
+            }
+            return createHostedProviderAuthSession(providerId);
+          })()
+        : (() => {
+            const opts = {
+              mode: params.mode,
+              workspace: typeof params.workspace === "string" ? params.workspace : undefined,
+            };
+            return new WizardSession((prompter) =>
+              context.wizardRunner(opts, defaultRuntime, prompter),
+            );
+          })();
+    if (!session) {
+      return;
+    }
     context.wizardSessions.set(sessionId, session);
     const result = await session.next();
     if (result.done) {

@@ -12,6 +12,10 @@ export const WizardStartParamsSchema = Type.Object(
   {
     mode: Type.Optional(Type.Union([Type.Literal("local"), Type.Literal("remote")])),
     workspace: Type.Optional(Type.String()),
+    kind: Type.Optional(
+      Type.Union([Type.Literal("onboarding"), Type.Literal("hosted-provider-auth")]),
+    ),
+    providerId: Type.Optional(NonEmptyString),
   },
   { additionalProperties: false },
 );

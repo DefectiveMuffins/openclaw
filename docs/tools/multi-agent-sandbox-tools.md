@@ -33,7 +33,7 @@ Credentials are **not** shared between agents. Never reuse `agentDir` across age
 If you want to share creds, copy `auth-profiles.json` into the other agent's `agentDir`.
 
 For how sandboxing behaves at runtime, see [Sandboxing](/gateway/sandboxing).
-For debugging “why is this blocked?”, see [Sandbox vs Tool Policy vs Elevated](/gateway/sandbox-vs-tool-policy-vs-elevated) and `openclaw sandbox explain`.
+For debugging â€œwhy is this blocked?â€, see [Sandbox vs Tool Policy vs Elevated](/gateway/sandbox-vs-tool-policy-vs-elevated) and `openclaw sandbox explain`.
 
 ---
 
@@ -220,7 +220,7 @@ The filtering order is:
 Each level can further restrict tools, but cannot grant back denied tools from earlier levels.
 If `agents.list[].tools.sandbox.tools` is set, it replaces `tools.sandbox.tools` for that agent.
 If `agents.list[].tools.profile` is set, it overrides `tools.profile` for that agent.
-Provider tool keys accept either `provider` (e.g. `google-antigravity`) or `provider/model` (e.g. `openai/gpt-5.2`).
+Provider tool keys accept either `provider` (e.g. `google-gemini-cli`) or `provider/model` (e.g. `openai/gpt-5.2`).
 
 ### Tool groups (shorthands)
 
@@ -379,7 +379,7 @@ After configuring multi-agent sandbox and tools:
 
 ### Tools still available despite deny list
 
-- Check tool filtering order: global → agent → sandbox → subagent
+- Check tool filtering order: global â†’ agent â†’ sandbox â†’ subagent
 - Each level can only further restrict, not grant back
 - Verify with logs: `[tools] filtering tools for agent:${agentId}`
 

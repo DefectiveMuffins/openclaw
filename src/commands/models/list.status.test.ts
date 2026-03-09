@@ -75,6 +75,35 @@ const mocks = vi.hoisted(() => {
       env: { shellEnv: { enabled: true } },
     }),
     loadProviderUsageSummary: vi.fn().mockResolvedValue(undefined),
+    resolveHostedRouting: vi.fn().mockResolvedValue({
+      enabled: true,
+      mode: "prefer-hosted",
+      configuredOrder: ["google", "qwen-portal"],
+      effectiveOrder: ["google", "qwen-portal"],
+      appendConfiguredModels: true,
+      availableCandidates: [{ provider: "google", model: "gemini-3-pro-preview" }],
+      providers: [
+        {
+          provider: "google",
+          modelRef: "google/gemini-3-pro-preview",
+          authMode: "api-key",
+          riskLabel: "official",
+          docsUrl: "https://docs.openclaw.ai/providers/google",
+          available: true,
+          skipReasons: [],
+        },
+        {
+          provider: "qwen-portal",
+          modelRef: "qwen-portal/coder-model",
+          authMode: "oauth",
+          riskLabel: "official",
+          docsUrl: "https://docs.openclaw.ai/providers/qwen",
+          available: false,
+          skipReasons: ["no auth"],
+        },
+      ],
+      skippedProviders: [{ provider: "qwen-portal", reason: ["no auth"] }],
+    }),
   };
 });
 
@@ -104,6 +133,10 @@ vi.mock("../../agents/auth-profiles.js", async (importOriginal) => {
 vi.mock("../../agents/model-auth.js", () => ({
   resolveEnvApiKey: mocks.resolveEnvApiKey,
   getCustomProviderApiKey: mocks.getCustomProviderApiKey,
+}));
+
+vi.mock("../../agents/hosted-routing.js", () => ({
+  resolveHostedRouting: mocks.resolveHostedRouting,
 }));
 
 vi.mock("../../infra/shell-env.js", () => ({
@@ -201,6 +234,15 @@ describe("modelsStatusCommand auth overview", () => {
     expect(mocks.resolveOpenClawAgentDir).toHaveBeenCalled();
     expect(payload.defaultModel).toBe("anthropic/claude-opus-4-5");
     expect(payload.auth.storePath).toBe("/tmp/openclaw-agent/auth-profiles.json");
+    expect(payload.hostedRouting).toMatchObject({
+      enabled: true,
+      mode: "prefer-hosted",
+      configuredOrder: ["google", "qwen-portal"],
+      effectiveOrder: ["google", "qwen-portal"],
+      availableProviders: ["google"],
+      availableCandidates: ["google/gemini-3-pro-preview"],
+      skippedProviders: [{ provider: "qwen-portal", reason: ["no auth"] }],
+    });
     expect(payload.auth.shellEnvFallback.enabled).toBe(true);
     expect(payload.auth.shellEnvFallback.appliedKeys).toContain("OPENAI_API_KEY");
     expect(payload.auth.missingProvidersInUse).toEqual([]);

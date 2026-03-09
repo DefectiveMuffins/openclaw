@@ -114,6 +114,11 @@ export function registerOnboardCommand(program: Command) {
     .option("--skip-daemon", "Skip gateway service install")
     .option("--daemon-runtime <runtime>", "Daemon runtime: node|bun")
     .option("--skip-channels", "Skip channel setup")
+    .option("--prefer-hosted", "Prefer authenticated hosted providers over local models")
+    .option(
+      "--hosted-provider-order <csv>",
+      "Comma-separated hosted provider order (provider ids only)",
+    )
     .option("--skip-skills", "Skip skills setup")
     .option("--skip-health", "Skip health check")
     .option("--skip-ui", "Skip Control UI/TUI prompts")
@@ -187,6 +192,8 @@ export function registerOnboardCommand(program: Command) {
           installDaemon,
           daemonRuntime: opts.daemonRuntime as GatewayDaemonRuntime | undefined,
           skipChannels: Boolean(opts.skipChannels),
+          preferHosted: Boolean(opts.preferHosted),
+          hostedProviderOrder: opts.hostedProviderOrder as string | undefined,
           skipSkills: Boolean(opts.skipSkills),
           skipHealth: Boolean(opts.skipHealth),
           skipUi: Boolean(opts.skipUi),

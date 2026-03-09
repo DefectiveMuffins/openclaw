@@ -16,6 +16,7 @@ import {
   updateSessionStore,
 } from "../../config/sessions.js";
 import { logVerbose } from "../../globals.js";
+import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { clearCommandLane, getQueueSize } from "../../process/command-queue.js";
 import { normalizeMainKey } from "../../routing/session-key.js";
 import { isReasoningTagProvider } from "../../utils/provider-utils.js";
@@ -62,8 +63,8 @@ function buildResetSessionNoticeText(params: {
   const modelLabel = `${params.provider}/${params.model}`;
   const defaultLabel = `${params.defaultProvider}/${params.defaultModel}`;
   return modelLabel === defaultLabel
-    ? `✅ New session started · model: ${modelLabel}`
-    : `✅ New session started · model: ${modelLabel} (default: ${defaultLabel})`;
+    ? `âœ… New session started Â· model: ${modelLabel}`
+    : `âœ… New session started Â· model: ${modelLabel} (default: ${defaultLabel})`;
 }
 
 function resolveResetSessionNoticeRoute(params: {
@@ -165,6 +166,7 @@ type RunPreparedReplyParams = {
   opts?: GetReplyOptions;
   defaultProvider: string;
   defaultModel: string;
+  hasResolvedHeartbeatModelOverride?: boolean;
   timeoutMs: number;
   isNewSession: boolean;
   resetTriggered: boolean;
@@ -209,6 +211,7 @@ export async function runPreparedReply(
     opts,
     defaultProvider,
     defaultModel,
+    hasResolvedHeartbeatModelOverride = false,
     timeoutMs,
     isNewSession,
     resetTriggered,
@@ -366,7 +369,7 @@ export async function runPreparedReply(
   const prefixedBody = [threadContextNote, prefixedBodyBase].filter(Boolean).join("\n\n");
   const mediaNote = buildInboundMediaNote(ctx);
   const mediaReplyHint = mediaNote
-    ? "To send an image back, prefer the message tool (media/path/filePath). If you must inline, use MEDIA:https://example.com/image.jpg (spaces ok, quote if needed) or a safe relative path like MEDIA:./image.jpg. Avoid absolute paths (MEDIA:/...) and ~ paths — they are blocked for security. Keep caption in the text body."
+    ? "To send an image back, prefer the message tool (media/path/filePath). If you must inline, use MEDIA:https://example.com/image.jpg (spaces ok, quote if needed) or a safe relative path like MEDIA:./image.jpg. Avoid absolute paths (MEDIA:/...) and ~ paths â€” they are blocked for security. Keep caption in the text body."
     : undefined;
   let prefixedCommandBody = mediaNote
     ? [mediaNote, mediaReplyHint, prefixedBody ?? ""].filter(Boolean).join("\n").trim()
@@ -459,6 +462,15 @@ export async function runPreparedReply(
     isNewSession,
   });
   const authProfileIdSource = sessionEntry?.authProfileOverrideSource;
+  const hookRunner = getGlobalHookRunner();
+  const hostedRoutingBlockedByHooks = Boolean(
+    hookRunner?.hasHooks("before_model_resolve") || hookRunner?.hasHooks("before_agent_start"),
+  );
+  const hostedRoutingEligible =
+    !hasResolvedHeartbeatModelOverride &&
+    !directives.hasModelDirective &&
+    !modelState.usedStoredModelOverride &&
+    !hostedRoutingBlockedByHooks;
   const followupRun = {
     prompt: queuedBody,
     messageId: sessionCtx.MessageSidFull ?? sessionCtx.MessageSid,
@@ -513,6 +525,7 @@ export async function runPreparedReply(
       blockReplyBreak: resolvedBlockStreamingBreak,
       ownerNumbers: command.ownerList.length > 0 ? command.ownerList : undefined,
       extraSystemPrompt: extraSystemPromptParts.join("\n\n") || undefined,
+      hostedRoutingEligible,
       ...(isReasoningTagProvider(provider) ? { enforceFinalTag: true } : {}),
     },
   };

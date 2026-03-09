@@ -106,13 +106,13 @@ external end-user instructions.
 - No synthetic tool results.
 - No thought signature stripping.
 
-**Google (Generative AI / Gemini CLI / Antigravity)**
+**Google (Generative AI / Gemini CLI)**
 
 - Tool call id sanitization: strict alphanumeric.
 - Tool result pairing repair and synthetic tool results.
 - Turn validation (Gemini-style turn alternation).
 - Google turn ordering fixup (prepend a tiny user bootstrap if history starts with assistant).
-- Antigravity Claude: normalize thinking signatures; drop unsigned thinking blocks.
+- Gemini turn ordering stays strict, so OpenClaw keeps the Google-specific turn repair path enabled.
 
 **Anthropic / Minimax (Anthropic-compatible)**
 

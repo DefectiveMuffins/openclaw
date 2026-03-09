@@ -349,6 +349,43 @@ describe("runOnboardingWizard", () => {
     );
   }
 
+  it("writes hosted routing config when preferHosted is enabled", async () => {
+    const prompter = buildWizardPrompter();
+    const runtime = createRuntime({ throwsOnExit: true });
+
+    await runOnboardingWizard(
+      {
+        acceptRisk: true,
+        flow: "quickstart",
+        authChoice: "skip",
+        preferHosted: true,
+        hostedProviderOrder: "google,qwen-portal",
+        installDaemon: false,
+        skipProviders: true,
+        skipSkills: true,
+        skipHealth: true,
+        skipUi: true,
+      },
+      runtime,
+      prompter,
+    );
+
+    expect(writeConfigFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agents: expect.objectContaining({
+          defaults: expect.objectContaining({
+            hostedRouting: {
+              enabled: true,
+              mode: "prefer-hosted",
+              providerOrder: ["google", "qwen-portal"],
+              appendConfiguredModels: true,
+            },
+          }),
+        }),
+      }),
+    );
+  });
+
   it("launches TUI without auto-delivery when hatching", async () => {
     await runTuiHatchTest({ writeBootstrapFile: true, expectedMessage: "Wake up, my friend!" });
   });

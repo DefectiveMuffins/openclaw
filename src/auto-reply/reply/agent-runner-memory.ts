@@ -489,7 +489,7 @@ export async function runMemoryFlushIfNeeded(params: {
   try {
     await runWithModelFallback({
       ...resolveModelFallbackOptions(params.followupRun.run),
-      run: (provider, model) => {
+      run: (provider, model, fallbackContext = { attempt: 1, total: 1 }) => {
         const { authProfile, embeddedContext, senderContext } = buildEmbeddedRunContexts({
           run: params.followupRun.run,
           sessionCtx: params.sessionCtx,
@@ -507,6 +507,7 @@ export async function runMemoryFlushIfNeeded(params: {
           ...embeddedContext,
           ...senderContext,
           ...runBaseParams,
+          modelFallbackEnabled: fallbackContext.total > 1,
           prompt: resolveMemoryFlushPromptForRun({
             prompt: memoryFlushSettings.prompt,
             cfg: params.cfg,

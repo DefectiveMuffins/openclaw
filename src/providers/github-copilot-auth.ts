@@ -2,9 +2,9 @@ import { intro, note, outro, spinner } from "@clack/prompts";
 import { ensureAuthProfileStore, upsertAuthProfile } from "../agents/auth-profiles.js";
 import { updateConfig } from "../commands/models/shared.js";
 import { applyAuthProfileConfig } from "../commands/onboard-auth.js";
-import { logConfigUpdated } from "../config/logging.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { stylePromptTitle } from "../terminal/prompt-style.js";
+import type { WizardPrompter } from "../wizard/prompts.js";
 
 const CLIENT_ID = "Iv1.b507a08c87ecfe98";
 const DEVICE_CODE_URL = "https://github.com/login/device/code";
@@ -114,6 +114,39 @@ async function pollForAccessToken(params: {
   throw new Error("GitHub device code expired; run login again");
 }
 
+export async function loginGitHubCopilotDeviceToken(params: {
+  prompter: WizardPrompter;
+  openUrl?: (url: string) => Promise<void>;
+}) {
+  const device = await requestDeviceCode({ scope: "read:user" });
+  await params.prompter.note(
+    [`Visit: ${device.verification_uri}`, `Code: ${device.user_code}`].join("\n"),
+    "GitHub Copilot",
+  );
+
+  if (params.openUrl) {
+    try {
+      await params.openUrl(device.verification_uri);
+    } catch {
+      // Keep the manual URL visible in the wizard note.
+    }
+  }
+
+  const progress = params.prompter.progress("Waiting for GitHub authorization...");
+  try {
+    const accessToken = await pollForAccessToken({
+      deviceCode: device.device_code,
+      intervalMs: Math.max(1000, device.interval * 1000),
+      expiresAt: Date.now() + device.expires_in * 1000,
+    });
+    progress.stop("GitHub access token acquired");
+    return accessToken;
+  } catch (error) {
+    progress.stop("GitHub device flow failed");
+    throw error;
+  }
+}
+
 export async function githubCopilotLoginCommand(
   opts: { profileId?: string; yes?: boolean },
   runtime: RuntimeEnv,
@@ -177,7 +210,6 @@ export async function githubCopilotLoginCommand(
     }),
   );
 
-  logConfigUpdated(runtime);
   runtime.log(`Auth profile: ${profileId} (github-copilot/token)`);
 
   outro("Done");

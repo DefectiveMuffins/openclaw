@@ -87,7 +87,7 @@ OpenClaw uses a lobster palette for CLI output.
 - `error` (#E23D2D): errors, failures.
 - `muted` (#8B7F77): de-emphasis, metadata.
 
-Palette source of truth: `src/terminal/palette.ts` (aka “lobster seam”).
+Palette source of truth: `src/terminal/palette.ts` (aka Ã¢â‚¬Å“lobster seamÃ¢â‚¬Â).
 
 ## Command tree
 
@@ -263,26 +263,26 @@ Note: plugins can add additional top-level commands (for example `openclaw voice
 
 ## Security
 
-- `openclaw security audit` — audit config + local state for common security foot-guns.
-- `openclaw security audit --deep` — best-effort live Gateway probe.
-- `openclaw security audit --fix` — tighten safe defaults and chmod state/config.
+- `openclaw security audit` Ã¢â‚¬â€ audit config + local state for common security foot-guns.
+- `openclaw security audit --deep` Ã¢â‚¬â€ best-effort live Gateway probe.
+- `openclaw security audit --fix` Ã¢â‚¬â€ tighten safe defaults and chmod state/config.
 
 ## Secrets
 
-- `openclaw secrets reload` — re-resolve refs and atomically swap the runtime snapshot.
-- `openclaw secrets audit` — scan for plaintext residues, unresolved refs, and precedence drift.
-- `openclaw secrets configure` — interactive helper for provider setup + SecretRef mapping + preflight/apply.
-- `openclaw secrets apply --from <plan.json>` — apply a previously generated plan (`--dry-run` supported).
+- `openclaw secrets reload` Ã¢â‚¬â€ re-resolve refs and atomically swap the runtime snapshot.
+- `openclaw secrets audit` Ã¢â‚¬â€ scan for plaintext residues, unresolved refs, and precedence drift.
+- `openclaw secrets configure` Ã¢â‚¬â€ interactive helper for provider setup + SecretRef mapping + preflight/apply.
+- `openclaw secrets apply --from <plan.json>` Ã¢â‚¬â€ apply a previously generated plan (`--dry-run` supported).
 
 ## Plugins
 
 Manage extensions and their config:
 
-- `openclaw plugins list` — discover plugins (use `--json` for machine output).
-- `openclaw plugins info <id>` — show details for a plugin.
-- `openclaw plugins install <path|.tgz|npm-spec>` — install a plugin (or add a plugin path to `plugins.load.paths`).
-- `openclaw plugins enable <id>` / `disable <id>` — toggle `plugins.entries.<id>.enabled`.
-- `openclaw plugins doctor` — report plugin load errors.
+- `openclaw plugins list` Ã¢â‚¬â€ discover plugins (use `--json` for machine output).
+- `openclaw plugins info <id>` Ã¢â‚¬â€ show details for a plugin.
+- `openclaw plugins install <path|.tgz|npm-spec>` Ã¢â‚¬â€ install a plugin (or add a plugin path to `plugins.load.paths`).
+- `openclaw plugins enable <id>` / `disable <id>` Ã¢â‚¬â€ toggle `plugins.entries.<id>.enabled`.
+- `openclaw plugins doctor` Ã¢â‚¬â€ report plugin load errors.
 
 Most plugin changes require a gateway restart. See [/plugin](/tools/plugin).
 
@@ -290,9 +290,9 @@ Most plugin changes require a gateway restart. See [/plugin](/tools/plugin).
 
 Vector search over `MEMORY.md` + `memory/*.md`:
 
-- `openclaw memory status` — show index stats.
-- `openclaw memory index` — reindex memory files.
-- `openclaw memory search "<query>"` (or `--query "<query>"`) — semantic search over memory.
+- `openclaw memory status` Ã¢â‚¬â€ show index stats.
+- `openclaw memory index` Ã¢â‚¬â€ reindex memory files.
+- `openclaw memory search "<query>"` (or `--query "<query>"`) Ã¢â‚¬â€ semantic search over memory.
 
 ## Chat slash commands
 
@@ -354,6 +354,8 @@ Options:
 - `--custom-model-id <id>` (non-interactive; used with `--auth-choice custom-api-key`)
 - `--custom-api-key <key>` (non-interactive; optional; used with `--auth-choice custom-api-key`; falls back to `CUSTOM_API_KEY` when omitted)
 - `--custom-provider-id <id>` (non-interactive; optional custom provider id)
+- `--prefer-hosted` (prefer authenticated hosted providers before local/default models)
+- `--hosted-provider-order <csv>` (comma-separated hosted provider ids; example `google,google-gemini-cli,qwen-portal`)
 - `--custom-compatibility <openai|anthropic>` (non-interactive; optional; default `openai`)
 - `--gateway-port <port>`
 - `--gateway-bind <loopback|lan|tailnet|auto|custom>`
@@ -670,7 +672,7 @@ Surfaces:
 Notes:
 
 - Data comes directly from provider usage endpoints (no estimates).
-- Providers: Anthropic, GitHub Copilot, OpenAI Codex OAuth, plus Gemini CLI/Antigravity when those provider plugins are enabled.
+- Providers: Anthropic, GitHub Copilot, OpenAI Codex OAuth, plus Gemini CLI when that provider plugin is enabled.
 - If no matching credentials exist, usage is hidden.
 - Details: see [Usage tracking](/concepts/usage-tracking).
 
@@ -772,7 +774,7 @@ Subcommands:
 
 Notes:
 
-- `gateway status` probes the Gateway RPC by default using the service’s resolved port/config (override with `--url/--token/--password`).
+- `gateway status` probes the Gateway RPC by default using the serviceÃ¢â‚¬â„¢s resolved port/config (override with `--url/--token/--password`).
 - `gateway status` supports `--no-probe`, `--deep`, and `--json` for scripting.
 - `gateway status` also surfaces legacy or extra gateway services when it can detect them (`--deep` adds system-level scans). Profile-named OpenClaw services are treated as first-class and aren't flagged as "extra".
 - `gateway status` prints which config path the CLI uses vs which config the service likely uses (service env), plus the resolved probe target URL.

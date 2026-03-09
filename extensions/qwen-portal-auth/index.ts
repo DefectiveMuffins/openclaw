@@ -57,7 +57,7 @@ const qwenPortalPlugin = {
             try {
               const result = await loginQwenPortalOAuth({
                 openUrl: ctx.openUrl,
-                note: ctx.prompter.note,
+                note: async (message, title) => await ctx.prompter.note(message, title),
                 progress,
               });
 

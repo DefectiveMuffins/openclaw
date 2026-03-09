@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import {
   authorizeOperatorScopesForMethod,
   isGatewayMethodClassified,
@@ -9,6 +9,9 @@ import { coreGatewayHandlers } from "./server-methods.js";
 describe("method scope resolution", () => {
   it("classifies sessions.resolve as read and poll as write", () => {
     expect(resolveLeastPrivilegeOperatorScopesForMethod("sessions.resolve")).toEqual([
+      "operator.read",
+    ]);
+    expect(resolveLeastPrivilegeOperatorScopesForMethod("models.hostedProviders")).toEqual([
       "operator.read",
     ]);
     expect(resolveLeastPrivilegeOperatorScopesForMethod("poll")).toEqual(["operator.write"]);
@@ -59,3 +62,4 @@ describe("core gateway method classification", () => {
     expect(unclassified).toEqual([]);
   });
 });
+

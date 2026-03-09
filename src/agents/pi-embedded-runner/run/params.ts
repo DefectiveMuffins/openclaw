@@ -72,6 +72,8 @@ export type RunEmbeddedPiAgentParams = {
   disableTools?: boolean;
   provider?: string;
   model?: string;
+  /** True when an outer model-fallback wrapper has additional candidates to try. */
+  modelFallbackEnabled?: boolean;
   modelPhase?: AgentModelRoutingPhase;
   taskType?: string;
   estimatedComplexity?: "simple" | "complex";

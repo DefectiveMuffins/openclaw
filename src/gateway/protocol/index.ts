@@ -130,10 +130,16 @@ import {
   LogsTailParamsSchema,
   type LogsTailResult,
   LogsTailResultSchema,
+  type HostedProviderStatus,
+  HostedProviderStatusSchema,
   type ModelsDiscoverProviderParams,
   ModelsDiscoverProviderParamsSchema,
   type ModelsDiscoverProviderResult,
   ModelsDiscoverProviderResultSchema,
+  type ModelsHostedProvidersParams,
+  ModelsHostedProvidersParamsSchema,
+  type ModelsHostedProvidersResult,
+  ModelsHostedProvidersResultSchema,
   type ModelsListParams,
   ModelsListParamsSchema,
   type NodeDescribeParams,
@@ -327,6 +333,9 @@ export const validateChannelsLogoutParams = ajv.compile<ChannelsLogoutParams>(
 export const validateModelsDiscoverProviderParams = ajv.compile<ModelsDiscoverProviderParams>(
   ModelsDiscoverProviderParamsSchema,
 );
+export const validateModelsHostedProvidersParams = ajv.compile<ModelsHostedProvidersParams>(
+  ModelsHostedProvidersParamsSchema,
+);
 export const validateModelsListParams = ajv.compile<ModelsListParams>(ModelsListParamsSchema);
 export const validateSkillsStatusParams = ajv.compile<SkillsStatusParams>(SkillsStatusParamsSchema);
 export const validateToolsCatalogParams = ajv.compile<ToolsCatalogParams>(ToolsCatalogParamsSchema);
@@ -496,8 +505,11 @@ export {
   AgentsFilesSetResultSchema,
   AgentsListParamsSchema,
   AgentsListResultSchema,
+  HostedProviderStatusSchema,
   ModelsDiscoverProviderParamsSchema,
   ModelsDiscoverProviderResultSchema,
+  ModelsHostedProvidersParamsSchema,
+  ModelsHostedProvidersResultSchema,
   ModelsListParamsSchema,
   SkillsStatusParamsSchema,
   ToolsCatalogParamsSchema,
@@ -588,8 +600,11 @@ export type {
   AgentsFilesSetResult,
   AgentsListParams,
   AgentsListResult,
+  HostedProviderStatus,
   ModelsDiscoverProviderParams,
   ModelsDiscoverProviderResult,
+  ModelsHostedProvidersParams,
+  ModelsHostedProvidersResult,
   SkillsStatusParams,
   ToolsCatalogParams,
   ToolsCatalogResult,

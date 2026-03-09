@@ -15,6 +15,7 @@ import {
   resolveAuthStorePathForDisplay,
   resolveProfileUnusableUntilForDisplay,
 } from "../../agents/auth-profiles.js";
+import { resolveHostedRouting } from "../../agents/hosted-routing.js";
 import { resolveEnvApiKey } from "../../agents/model-auth.js";
 import {
   buildModelAliasIndex,
@@ -235,7 +236,7 @@ export async function modelsStatusCommand(
   let probeSummary: AuthProbeSummary | undefined;
   if (opts.probe) {
     probeSummary = await withProgressTotals(
-      { label: "Probing auth profiles…", total: 1 },
+      { label: "Probing auth profilesâ€¦", total: 1 },
       async (update) => {
         return await runAuthProbes({
           cfg,
@@ -274,6 +275,7 @@ export async function modelsStatusCommand(
   const oauthProfiles = authHealth.profiles.filter(
     (profile) => profile.type === "oauth" || profile.type === "token",
   );
+  const hostedRouting = await resolveHostedRouting({ cfg, agentDir });
 
   const unusableProfiles = (() => {
     const now = Date.now();
@@ -343,6 +345,21 @@ export async function modelsStatusCommand(
             : {}),
           aliases,
           allowed,
+          hostedRouting: {
+            enabled: hostedRouting.enabled,
+            mode: hostedRouting.mode,
+            configuredOrder: hostedRouting.configuredOrder,
+            effectiveOrder: hostedRouting.effectiveOrder,
+            appendConfiguredModels: hostedRouting.appendConfiguredModels,
+            availableProviders: hostedRouting.providers
+              .filter((entry) => entry.available)
+              .map((entry) => entry.provider),
+            availableCandidates: hostedRouting.availableCandidates.map(
+              (entry) => `${entry.provider}/${entry.model}`,
+            ),
+            providers: hostedRouting.providers,
+            skippedProviders: hostedRouting.skippedProviders,
+          },
           auth: {
             storePath: resolveAuthStorePathForDisplay(agentDir),
             shellEnvFallback: {
@@ -451,6 +468,51 @@ export async function modelsStatusCommand(
       rich,
       allowed.length ? theme.info : theme.muted,
       allowed.length ? allowed.join(", ") : "all",
+    )}`,
+  );
+
+  const hostedOrderLabel = hostedRouting.configuredOrder.length
+    ? hostedRouting.configuredOrder.join(", ")
+    : `${hostedRouting.effectiveOrder.join(", ")} (default)`;
+  const hostedAvailableLabel = hostedRouting.providers
+    .filter((entry) => entry.available)
+    .map((entry) => `${entry.provider} (${entry.modelRef})`)
+    .join(", ");
+  const hostedSkippedLabel = hostedRouting.skippedProviders
+    .map((entry) => `${entry.provider} (${entry.reason.join(", ")})`)
+    .join(", ");
+
+  runtime.log("");
+  runtime.log(colorize(rich, theme.heading, "Hosted routing"));
+  runtime.log(
+    `${label("Enabled")}${colorize(rich, theme.muted, ":")} ${colorize(
+      rich,
+      hostedRouting.enabled ? theme.success : theme.muted,
+      hostedRouting.enabled ? "on" : "off",
+    )}`,
+  );
+  runtime.log(
+    `${label("Mode")}${colorize(rich, theme.muted, ":")} ${colorize(rich, theme.info, hostedRouting.mode)}`,
+  );
+  runtime.log(
+    `${label("Order")}${colorize(rich, theme.muted, ":")} ${colorize(
+      rich,
+      hostedOrderLabel ? theme.info : theme.muted,
+      hostedOrderLabel || "-",
+    )}`,
+  );
+  runtime.log(
+    `${label(`Available (${hostedRouting.availableCandidates.length || 0})`)}${colorize(rich, theme.muted, ":")} ${colorize(
+      rich,
+      hostedAvailableLabel ? theme.success : theme.muted,
+      hostedAvailableLabel || "-",
+    )}`,
+  );
+  runtime.log(
+    `${label(`Skipped (${hostedRouting.skippedProviders.length || 0})`)}${colorize(rich, theme.muted, ":")} ${colorize(
+      rich,
+      hostedSkippedLabel ? theme.warn : theme.muted,
+      hostedSkippedLabel || "-",
     )}`,
   );
 
@@ -656,8 +718,8 @@ export async function modelsStatusCommand(
         const modeLabel = result.mode ? ` ${colorize(rich, theme.muted, `(${result.mode})`)}` : "";
         const profile = `${colorize(rich, theme.accent, result.label)}${modeLabel}`;
         const detail = result.error?.trim();
-        const detailLabel = detail ? `\n${colorize(rich, theme.muted, `↳ ${detail}`)}` : "";
-        const statusLabel = `${status}${colorize(rich, theme.muted, ` · ${latency}`)}${detailLabel}`;
+        const detailLabel = detail ? `\n${colorize(rich, theme.muted, `â†³ ${detail}`)}` : "";
+        const statusLabel = `${status}${colorize(rich, theme.muted, ` Â· ${latency}`)}${detailLabel}`;
         return {
           Model: colorize(rich, theme.heading, modelLabel),
           Profile: profile,

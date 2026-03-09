@@ -41,7 +41,7 @@ const geminiCliPlugin = {
                 isRemote: ctx.isRemote,
                 openUrl: ctx.openUrl,
                 log: (msg) => ctx.runtime.log(msg),
-                note: ctx.prompter.note,
+                note: async (message, title) => await ctx.prompter.note(message, title),
                 prompt: async (message) => String(await ctx.prompter.text({ message })),
                 progress: spin,
               });

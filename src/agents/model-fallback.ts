@@ -17,6 +17,7 @@ import {
   isFailoverError,
   isTimeoutError,
 } from "./failover-error.js";
+import { resolveHostedRouting } from "./hosted-routing.js";
 import {
   buildConfiguredAllowlistKeys,
   buildModelAliasIndex,
@@ -40,6 +41,11 @@ type FallbackAttempt = {
   reason?: FailoverReason;
   status?: number;
   code?: string;
+};
+
+type FallbackRunContext = {
+  attempt: number;
+  total: number;
 };
 
 /**
@@ -124,14 +130,15 @@ function buildFallbackSuccess<T>(params: {
 }
 
 async function runFallbackCandidate<T>(params: {
-  run: (provider: string, model: string) => Promise<T>;
+  run: (provider: string, model: string, context?: FallbackRunContext) => Promise<T>;
   provider: string;
   model: string;
+  context: FallbackRunContext;
 }): Promise<{ ok: true; result: T } | { ok: false; error: unknown }> {
   try {
     return {
       ok: true,
-      result: await params.run(params.provider, params.model),
+      result: await params.run(params.provider, params.model, params.context),
     };
   } catch (err) {
     if (shouldRethrowAbort(err)) {
@@ -142,15 +149,17 @@ async function runFallbackCandidate<T>(params: {
 }
 
 async function runFallbackAttempt<T>(params: {
-  run: (provider: string, model: string) => Promise<T>;
+  run: (provider: string, model: string, context?: FallbackRunContext) => Promise<T>;
   provider: string;
   model: string;
   attempts: FallbackAttempt[];
+  context: FallbackRunContext;
 }): Promise<{ success: ModelFallbackRunResult<T> } | { error: unknown }> {
   const runResult = await runFallbackCandidate({
     run: params.run,
     provider: params.provider,
     model: params.model,
+    context: params.context,
   });
   if (runResult.ok) {
     return {
@@ -241,7 +250,7 @@ function resolveImageFallbackCandidates(params: {
   return candidates;
 }
 
-function resolveFallbackCandidates(params: {
+function resolveConfiguredFallbackCandidates(params: {
   cfg: OpenClawConfig | undefined;
   provider: string;
   model: string;
@@ -318,6 +327,50 @@ function resolveFallbackCandidates(params: {
   return candidates;
 }
 
+async function resolveFallbackCandidates(params: {
+  cfg: OpenClawConfig | undefined;
+  provider: string;
+  model: string;
+  agentDir?: string;
+  /** Optional explicit fallbacks list; when provided (even empty), replaces agents.defaults.model.fallbacks. */
+  fallbacksOverride?: string[];
+  hostedRoutingEligible?: boolean;
+}): Promise<ModelCandidate[]> {
+  const configuredCandidates = resolveConfiguredFallbackCandidates({
+    cfg: params.cfg,
+    provider: params.provider,
+    model: params.model,
+    fallbacksOverride: params.fallbacksOverride,
+  });
+
+  if (!params.cfg || params.hostedRoutingEligible !== true) {
+    return configuredCandidates;
+  }
+
+  const hostedRouting = await resolveHostedRouting({
+    cfg: params.cfg,
+    agentDir: params.agentDir,
+  });
+  if (!hostedRouting.enabled) {
+    return configuredCandidates;
+  }
+
+  if (hostedRouting.availableCandidates.length === 0) {
+    return hostedRouting.mode === "hosted-only" ? [] : configuredCandidates;
+  }
+
+  const { candidates, addExplicitCandidate } = createModelCandidateCollector(undefined);
+  for (const candidate of hostedRouting.availableCandidates) {
+    addExplicitCandidate(candidate);
+  }
+  if (hostedRouting.appendConfiguredModels) {
+    for (const candidate of configuredCandidates) {
+      addExplicitCandidate(candidate);
+    }
+  }
+  return candidates;
+}
+
 const lastProbeAttempt = new Map<string, number>();
 const MIN_PROBE_INTERVAL_MS = 30_000; // 30 seconds between probes per key
 const PROBE_MARGIN_MS = 2 * 60 * 1000;
@@ -354,7 +407,7 @@ function shouldProbePrimaryDuringCooldown(params: {
   return params.now >= soonest - PROBE_MARGIN_MS;
 }
 
-/** @internal – exposed for unit tests only */
+/** @internal â€“ exposed for unit tests only */
 export const _probeThrottleInternals = {
   lastProbeAttempt,
   MIN_PROBE_INTERVAL_MS,
@@ -439,15 +492,21 @@ export async function runWithModelFallback<T>(params: {
   agentDir?: string;
   /** Optional explicit fallbacks list; when provided (even empty), replaces agents.defaults.model.fallbacks. */
   fallbacksOverride?: string[];
-  run: (provider: string, model: string) => Promise<T>;
+  hostedRoutingEligible?: boolean;
+  run: (provider: string, model: string, context?: FallbackRunContext) => Promise<T>;
   onError?: ModelFallbackErrorHandler;
 }): Promise<ModelFallbackRunResult<T>> {
-  const candidates = resolveFallbackCandidates({
+  const candidates = await resolveFallbackCandidates({
     cfg: params.cfg,
     provider: params.provider,
     model: params.model,
+    agentDir: params.agentDir,
     fallbacksOverride: params.fallbacksOverride,
+    hostedRoutingEligible: params.hostedRoutingEligible,
   });
+  if (candidates.length === 0) {
+    throw new Error("No model candidates available after hosted routing and allowlist checks.");
+  }
   const authStore = params.cfg
     ? ensureAuthProfileStore(params.agentDir, { allowKeychainPrompt: false })
     : null;
@@ -500,7 +559,12 @@ export async function runWithModelFallback<T>(params: {
       }
     }
 
-    const attemptRun = await runFallbackAttempt({ run: params.run, ...candidate, attempts });
+    const attemptRun = await runFallbackAttempt({
+      run: params.run,
+      ...candidate,
+      attempts,
+      context: { attempt: i + 1, total: candidates.length },
+    });
     if ("success" in attemptRun) {
       return attemptRun.success;
     }
@@ -563,7 +627,7 @@ export async function runWithModelFallback<T>(params: {
 export async function runWithImageModelFallback<T>(params: {
   cfg: OpenClawConfig | undefined;
   modelOverride?: string;
-  run: (provider: string, model: string) => Promise<T>;
+  run: (provider: string, model: string, context?: FallbackRunContext) => Promise<T>;
   onError?: ModelFallbackErrorHandler;
 }): Promise<ModelFallbackRunResult<T>> {
   const candidates = resolveImageFallbackCandidates({
@@ -582,7 +646,12 @@ export async function runWithImageModelFallback<T>(params: {
 
   for (let i = 0; i < candidates.length; i += 1) {
     const candidate = candidates[i];
-    const attemptRun = await runFallbackAttempt({ run: params.run, ...candidate, attempts });
+    const attemptRun = await runFallbackAttempt({
+      run: params.run,
+      ...candidate,
+      attempts,
+      context: { attempt: i + 1, total: candidates.length },
+    });
     if ("success" in attemptRun) {
       return attemptRun.success;
     }

@@ -1,4 +1,4 @@
-import { html, nothing } from "lit";
+﻿import { html, nothing } from "lit";
 import { parseAgentSessionKey } from "../../../src/routing/session-key.js";
 import { t } from "../i18n/index.ts";
 import { refreshChatAvatar } from "./app-chat.ts";
@@ -9,10 +9,18 @@ import { loadAgentFileContent, loadAgentFiles, saveAgentFile } from "./controlle
 import { loadAgentIdentities, loadAgentIdentity } from "./controllers/agent-identity.ts";
 import { loadAgentSkills } from "./controllers/agent-skills.ts";
 import {
+  cancelHostedProviderAuth,
   discoverProviderModels,
   loadAgentModelChoices,
   loadAgents,
+  loadHostedProviders,
   loadToolsCatalog,
+  moveHostedRoutingProvider,
+  startHostedProviderAuth,
+  submitHostedProviderAuthStep,
+  updateHostedRoutingAppendConfiguredModels,
+  updateHostedRoutingMode,
+  updateHostedRoutingProviderEnabled,
 } from "./controllers/agents.ts";
 import { loadChannels } from "./controllers/channels.ts";
 import { loadChatHistory } from "./controllers/chat.ts";
@@ -81,6 +89,7 @@ import { renderCron } from "./views/cron.ts";
 import { renderDebug } from "./views/debug.ts";
 import { renderExecApprovalPrompt } from "./views/exec-approval.ts";
 import { renderGatewayUrlConfirmation } from "./views/gateway-url-confirmation.ts";
+import { renderHostedProviderAuthDialog } from "./views/hosted-provider-auth-dialog.ts";
 import { renderInstances } from "./views/instances.ts";
 import { renderLogs } from "./views/logs.ts";
 import { renderNodes } from "./views/nodes.ts";
@@ -226,6 +235,33 @@ export function renderApp(state: AppViewState) {
       ? rawDeliveryToSuggestions.filter((value) => isHttpUrl(value))
       : rawDeliveryToSuggestions;
 
+  const refreshHostedProviderState = async () => {
+    await loadHostedProviders(state);
+    await loadAgentModelChoices(state);
+    await loadConfig(state);
+  };
+
+  const handleHostedProviderAuthStart = async (providerId: string) => {
+    const status = await startHostedProviderAuth(state, providerId);
+    if (status && status !== "running" && status !== "idle") {
+      await refreshHostedProviderState();
+    }
+  };
+
+  const handleHostedProviderAuthSubmit = async (overrideValue?: unknown) => {
+    const status = await submitHostedProviderAuthStep(
+      state,
+      overrideValue === undefined ? state.hostedProviderAuthValue : overrideValue,
+    );
+    if (status && status !== "running" && status !== "idle") {
+      await refreshHostedProviderState();
+    }
+  };
+
+  const handleHostedProviderAuthCancel = async () => {
+    await cancelHostedProviderAuth(state);
+  };
+
   return html`
     <div class="shell ${isChat ? "shell--chat" : ""} ${chatFocus ? "shell--chat-focus" : ""} ${state.settings.navCollapsed ? "shell--nav-collapsed" : ""} ${state.onboarding ? "shell--onboarding" : ""}">
       <header class="topbar">
@@ -285,7 +321,7 @@ export function renderApp(state: AppViewState) {
                 aria-expanded=${!isGroupCollapsed}
               >
                 <span class="nav-label__text">${t(`nav.${group.label}`)}</span>
-                <span class="nav-label__chevron">${isGroupCollapsed ? "+" : "−"}</span>
+                <span class="nav-label__chevron">${isGroupCollapsed ? "+" : "âˆ’"}</span>
               </button>
               <div class="nav-group__items">
                 ${group.tabs.map((tab) => renderTab(state, tab))}
@@ -322,7 +358,7 @@ export function renderApp(state: AppViewState) {
                 class="btn btn--sm update-banner__btn"
                 ?disabled=${state.updateRunning || !state.connected}
                 @click=${() => runUpdate(state)}
-              >${state.updateRunning ? "Updating…" : "Update now"}</button>
+              >${state.updateRunning ? "Updatingâ€¦" : "Update now"}</button>
             </div>`
             : nothing
         }
@@ -612,10 +648,16 @@ export function renderApp(state: AppViewState) {
                 toolsCatalogLoading: state.toolsCatalogLoading,
                 toolsCatalogError: state.toolsCatalogError,
                 toolsCatalogResult: state.toolsCatalogResult,
+                hostedProvidersLoading: state.hostedProvidersLoading,
+                hostedProvidersError: state.hostedProvidersError,
+                hostedProvidersResult: state.hostedProvidersResult,
+                hostedProvidersNotice: state.hostedProvidersNotice,
+                hostedProviderAuthBusy: state.hostedProviderAuthBusy,
                 skillsFilter: state.skillsFilter,
                 onRefresh: async () => {
                   await loadAgents(state);
                   await loadAgentModelChoices(state);
+                  await loadHostedProviders(state);
                   const nextSelected =
                     state.agentsSelectedId ??
                     state.agentsList?.defaultId ??
@@ -760,8 +802,14 @@ export function renderApp(state: AppViewState) {
                     removeConfigFormValue(state, [...basePath, "deny"]);
                   }
                 },
-                onConfigReload: () => loadConfig(state),
-                onConfigSave: () => saveConfig(state),
+                onConfigReload: async () => {
+                  await loadConfig(state);
+                  await loadHostedProviders(state);
+                },
+                onConfigSave: async () => {
+                  await saveConfig(state);
+                  await loadHostedProviders(state);
+                },
                 onChannelsRefresh: () => loadChannels(state, false),
                 onCronRefresh: () => state.loadCron(),
                 onSkillsFilterChange: (next) => (state.skillsFilter = next),
@@ -933,6 +981,17 @@ export function renderApp(state: AppViewState) {
                     ? { primary, fallbacks: normalized }
                     : { fallbacks: normalized };
                   updateConfigFormValue(state, basePath, next);
+                },
+                onHostedRoutingModeChange: (mode) => updateHostedRoutingMode(state, mode),
+                onHostedRoutingAppendConfiguredModelsChange: (enabled) =>
+                  updateHostedRoutingAppendConfiguredModels(state, enabled),
+                onHostedRoutingProviderToggle: (providerId, enabled) =>
+                  updateHostedRoutingProviderEnabled(state, providerId, enabled),
+                onHostedRoutingProviderMove: (providerId, direction) =>
+                  moveHostedRoutingProvider(state, providerId, direction),
+                onHostedProvidersRefresh: () => loadHostedProviders(state),
+                onHostedProviderAuth: (providerId) => {
+                  void handleHostedProviderAuthStart(providerId);
                 },
               })
             : nothing
@@ -1203,8 +1262,32 @@ export function renderApp(state: AppViewState) {
             : nothing
         }
       </main>
+      ${
+        renderHostedProviderAuthDialog({
+          providerId: state.hostedProviderAuthProviderId,
+          step: state.hostedProviderAuthStep,
+          value: state.hostedProviderAuthValue,
+          busy: state.hostedProviderAuthBusy,
+          error: state.hostedProviderAuthError,
+          onValueChange: (value) => {
+            state.hostedProviderAuthValue = value;
+          },
+          onSubmit: (value) => {
+            void handleHostedProviderAuthSubmit(value);
+          },
+          onCancel: () => {
+            void handleHostedProviderAuthCancel();
+          },
+        })
+      }
       ${renderExecApprovalPrompt(state)}
       ${renderGatewayUrlConfirmation(state)}
     </div>
   `;
 }
+
+
+
+
+
+

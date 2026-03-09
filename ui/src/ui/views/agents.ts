@@ -1,4 +1,4 @@
-import { html, nothing } from "lit";
+﻿import { html, nothing } from "lit";
 import { buildAgentMainSessionKey } from "../../../../src/routing/session-key.js";
 import type {
   AgentIdentityResult,
@@ -8,6 +8,8 @@ import type {
   CronJob,
   CronStatus,
   GatewayModelChoice,
+  HostedProviderStatus,
+  ModelsHostedProvidersResult,
   SkillStatusReport,
   ToolsCatalogResult,
 } from "../types.ts";
@@ -21,15 +23,23 @@ import {
   agentBadgeText,
   buildAgentContext,
   buildModelOptions,
+  formatHostedProviderSkipReasons,
+  formatHostedProviderStatus,
+  isHostedProviderSelected,
   normalizeAgentLabel,
   normalizeModelValue,
+  orderHostedProviders,
   parseFallbackList,
   resolveAgentConfig,
   resolveAgentEmoji,
   resolveAgentOptimizationSummary,
   resolveEffectiveModelFallbacks,
+  resolveHostedRoutingAppendConfiguredModels,
+  resolveHostedRoutingProviderOrder,
+  resolveHostedRoutingUiMode,
   resolveModelLabel,
   resolveModelPrimary,
+  type HostedRoutingUiMode,
 } from "./agents-utils.ts";
 
 export type AgentsPanel = "overview" | "files" | "tools" | "skills" | "channels" | "cron";
@@ -74,6 +84,11 @@ export type AgentsProps = {
   toolsCatalogLoading: boolean;
   toolsCatalogError: string | null;
   toolsCatalogResult: ToolsCatalogResult | null;
+  hostedProvidersLoading: boolean;
+  hostedProvidersError: string | null;
+  hostedProvidersResult: ModelsHostedProvidersResult | null;
+  hostedProvidersNotice: string | null;
+  hostedProviderAuthBusy: boolean;
   skillsFilter: string;
   onRefresh: () => void;
   onSelectAgent: (agentId: string) => void;
@@ -90,6 +105,12 @@ export type AgentsProps = {
   onDiscoverLmStudioModels: () => void;
   onModelChange: (agentId: string, modelId: string | null) => void;
   onModelFallbacksChange: (agentId: string, fallbacks: string[]) => void;
+  onHostedRoutingModeChange: (mode: HostedRoutingUiMode) => void;
+  onHostedRoutingAppendConfiguredModelsChange: (enabled: boolean) => void;
+  onHostedRoutingProviderToggle: (providerId: string, enabled: boolean) => void;
+  onHostedRoutingProviderMove: (providerId: string, direction: "up" | "down") => void;
+  onHostedProvidersRefresh: () => void;
+  onHostedProviderAuth: (providerId: string) => void;
   onChannelsRefresh: () => void;
   onCronRefresh: () => void;
   onSkillsFilterChange: (next: string) => void;
@@ -112,6 +133,194 @@ function buildTabHref(basePath: string, tab: "chat" | "sessions" | "config"): st
   const normalized =
     basePath && basePath !== "/" ? (basePath.endsWith("/") ? basePath.slice(0, -1) : basePath) : "";
   return `${normalized}/${tab}`;
+}
+
+type HostedProviderManagerParams = {
+  defaults: ReturnType<typeof resolveAgentConfig>["defaults"];
+  hostedRoutingMode: HostedRoutingUiMode;
+  hostedProvidersLoading: boolean;
+  hostedProvidersError: string | null;
+  hostedProvidersResult: ModelsHostedProvidersResult | null;
+  hostedProvidersNotice: string | null;
+  hostedProviderAuthBusy: boolean;
+  configLoading: boolean;
+  configSaving: boolean;
+  configDirty: boolean;
+  onHostedRoutingAppendConfiguredModelsChange: (enabled: boolean) => void;
+  onHostedRoutingProviderToggle: (providerId: string, enabled: boolean) => void;
+  onHostedRoutingProviderMove: (providerId: string, direction: "up" | "down") => void;
+  onHostedProvidersRefresh: () => void;
+  onHostedProviderAuth: (providerId: string) => void;
+};
+
+function renderHostedProviderRow(params: {
+  provider: HostedProviderStatus;
+  selected: boolean;
+  selectedIndex: number;
+  selectedCount: number;
+  controlsDisabled: boolean;
+  authDisabled: boolean;
+  onHostedRoutingProviderToggle: (providerId: string, enabled: boolean) => void;
+  onHostedRoutingProviderMove: (providerId: string, direction: "up" | "down") => void;
+  onHostedProviderAuth: (providerId: string) => void;
+}) {
+  const { provider, selected, selectedIndex, selectedCount, controlsDisabled, authDisabled } = params;
+  const authLabel = provider.skipReasons.includes("no auth") ? "Connect" : "Configure";
+  return html`
+    <div class="hosted-provider-row ${selected ? "active" : ""}">
+      <label class="hosted-provider-main">
+        <input
+          type="checkbox"
+          .checked=${selected}
+          ?disabled=${controlsDisabled}
+          @change=${(event: Event) =>
+            params.onHostedRoutingProviderToggle(
+              provider.provider,
+              (event.target as HTMLInputElement).checked,
+            )}
+        />
+        <div class="hosted-provider-copy">
+          <div class="hosted-provider-title-row">
+            <div class="hosted-provider-title">${provider.label}</div>
+            ${provider.optInOnly ? html`<span class="agent-pill">opt-in</span>` : nothing}
+            <span class="pill ${provider.available ? "" : "danger"}">${formatHostedProviderStatus(provider)}</span>
+          </div>
+          <div class="agent-kv-sub muted">
+            <span class="mono">${provider.modelRef}</span> | ${provider.authMode} | ${provider.riskLabel}
+          </div>
+          <div class="agent-kv-sub muted">${formatHostedProviderSkipReasons(provider)}</div>
+        </div>
+      </label>
+      <div class="hosted-provider-actions">
+        <button
+          class="btn btn--sm"
+          ?disabled=${authDisabled}
+          @click=${() => params.onHostedProviderAuth(provider.provider)}
+        >
+          ${authLabel}
+        </button>
+        <a
+          class="btn btn--sm"
+          href=${provider.docsUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Docs
+        </a>
+        <button
+          class="btn btn--sm"
+          ?disabled=${controlsDisabled || !selected || selectedIndex === 0}
+          @click=${() => params.onHostedRoutingProviderMove(provider.provider, "up")}
+        >
+          Up
+        </button>
+        <button
+          class="btn btn--sm"
+          ?disabled=${controlsDisabled || !selected || selectedIndex === selectedCount - 1}
+          @click=${() => params.onHostedRoutingProviderMove(provider.provider, "down")}
+        >
+          Down
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function renderHostedProviderManager(params: HostedProviderManagerParams) {
+  const providerOrder = resolveHostedRoutingProviderOrder(params.defaults, params.hostedProvidersResult);
+  const providers = orderHostedProviders(params.defaults, params.hostedProvidersResult);
+  const selectedProviders = providers.filter((provider) =>
+    isHostedProviderSelected(provider.provider, params.defaults, params.hostedProvidersResult),
+  );
+  const appendConfiguredModels = resolveHostedRoutingAppendConfiguredModels(
+    params.defaults,
+    params.hostedProvidersResult,
+  );
+  const controlsDisabled = params.configLoading || params.configSaving;
+  const authDisabled = controlsDisabled || params.configDirty || params.hostedProviderAuthBusy;
+  const summary =
+    selectedProviders.length > 0
+      ? selectedProviders.map((provider) => provider.label).join(" -> ")
+      : "No hosted providers selected.";
+
+  return html`
+    <div style="margin-top: 16px;">
+      <div class="hosted-provider-summary">
+        <div>
+          <div class="label">Hosted provider order</div>
+          <div class="card-sub" style="margin-top: 4px;">${summary}</div>
+        </div>
+        <button
+          class="btn btn--sm"
+          ?disabled=${params.hostedProvidersLoading}
+          @click=${params.onHostedProvidersRefresh}
+        >
+          ${params.hostedProvidersLoading ? "Refreshing..." : "Refresh providers"}
+        </button>
+      </div>
+      <div class="row" style="gap: 12px; flex-wrap: wrap; margin-top: 12px; align-items: center;">
+        <label class="hosted-provider-checkbox-row">
+          <input
+            type="checkbox"
+            .checked=${appendConfiguredModels}
+            ?disabled=${controlsDisabled}
+            @change=${(event: Event) =>
+              params.onHostedRoutingAppendConfiguredModelsChange(
+                (event.target as HTMLInputElement).checked,
+              )}
+          />
+          <span>Append configured primary and fallbacks after hosted providers</span>
+        </label>
+        <div class="agent-kv-sub muted">
+          ${
+            params.hostedRoutingMode === "off"
+              ? "Manual primary and fallback models are used directly."
+              : appendConfiguredModels
+                ? "Hosted providers run first, then your configured model stack."
+                : "Hosted providers run alone unless you switch modes or enable configured fallbacks."
+          }
+        </div>
+      </div>
+      ${
+        params.configDirty
+          ? html`<div class="callout danger" style="margin-top: 12px;">
+              Save or reload config before changing provider login.
+            </div>`
+          : nothing
+      }
+      ${
+        params.hostedProvidersError
+          ? html`<div class="callout danger" style="margin-top: 12px;">${params.hostedProvidersError}</div>`
+          : nothing
+      }
+      ${
+        params.hostedProvidersNotice
+          ? html`<div class="callout" style="margin-top: 12px;">${params.hostedProvidersNotice}</div>`
+          : nothing
+      }
+      <div class="hosted-provider-list" style="margin-top: 12px;">
+        ${
+          providers.length === 0
+            ? html`<div class="muted">No hosted providers detected yet.</div>`
+            : providers.map((provider) => {
+                const selected = selectedProviders.some((entry) => entry.provider === provider.provider);
+                const selectedIndex = providerOrder.indexOf(provider.provider);
+                return renderHostedProviderRow({
+                  provider,
+                  selected,
+                  selectedIndex,
+                  selectedCount: selectedProviders.length,
+                  controlsDisabled,
+                  authDisabled,
+                  onHostedRoutingProviderToggle: params.onHostedRoutingProviderToggle,
+                  onHostedRoutingProviderMove: params.onHostedRoutingProviderMove,
+                  onHostedProviderAuth: params.onHostedProviderAuth,
+                });
+              })
+        }
+      </div>
+    </div>
+  `;
 }
 
 export function renderAgents(props: AgentsProps) {
@@ -200,11 +409,23 @@ export function renderAgents(props: AgentsProps) {
                         configLoading: props.configLoading,
                         configSaving: props.configSaving,
                         configDirty: props.configDirty,
+                        hostedProvidersLoading: props.hostedProvidersLoading,
+                        hostedProvidersError: props.hostedProvidersError,
+                        hostedProvidersResult: props.hostedProvidersResult,
+                        hostedProvidersNotice: props.hostedProvidersNotice,
+                        hostedProviderAuthBusy: props.hostedProviderAuthBusy,
                         onConfigReload: props.onConfigReload,
                         onConfigSave: props.onConfigSave,
                         onDiscoverLmStudioModels: props.onDiscoverLmStudioModels,
                         onModelChange: props.onModelChange,
                         onModelFallbacksChange: props.onModelFallbacksChange,
+                        onHostedRoutingModeChange: props.onHostedRoutingModeChange,
+                        onHostedRoutingAppendConfiguredModelsChange:
+                          props.onHostedRoutingAppendConfiguredModelsChange,
+                        onHostedRoutingProviderToggle: props.onHostedRoutingProviderToggle,
+                        onHostedRoutingProviderMove: props.onHostedRoutingProviderMove,
+                        onHostedProvidersRefresh: props.onHostedProvidersRefresh,
+                        onHostedProviderAuth: props.onHostedProviderAuth,
                       })
                     : nothing
                 }
@@ -390,11 +611,22 @@ function renderAgentOverview(params: {
   configLoading: boolean;
   configSaving: boolean;
   configDirty: boolean;
+  hostedProvidersLoading: boolean;
+  hostedProvidersError: string | null;
+  hostedProvidersResult: ModelsHostedProvidersResult | null;
+  hostedProvidersNotice: string | null;
+  hostedProviderAuthBusy: boolean;
   onConfigReload: () => void;
   onConfigSave: () => void;
   onDiscoverLmStudioModels: () => void;
   onModelChange: (agentId: string, modelId: string | null) => void;
   onModelFallbacksChange: (agentId: string, fallbacks: string[]) => void;
+  onHostedRoutingModeChange: (mode: HostedRoutingUiMode) => void;
+  onHostedRoutingAppendConfiguredModelsChange: (enabled: boolean) => void;
+  onHostedRoutingProviderToggle: (providerId: string, enabled: boolean) => void;
+  onHostedRoutingProviderMove: (providerId: string, direction: "up" | "down") => void;
+  onHostedProvidersRefresh: () => void;
+  onHostedProviderAuth: (providerId: string) => void;
 }) {
   const {
     agent,
@@ -411,11 +643,22 @@ function renderAgentOverview(params: {
     configLoading,
     configSaving,
     configDirty,
+    hostedProvidersLoading,
+    hostedProvidersError,
+    hostedProvidersResult,
+    hostedProvidersNotice,
+    hostedProviderAuthBusy,
     onConfigReload,
     onConfigSave,
     onDiscoverLmStudioModels,
     onModelChange,
     onModelFallbacksChange,
+    onHostedRoutingModeChange,
+    onHostedRoutingAppendConfiguredModelsChange,
+    onHostedRoutingProviderToggle,
+    onHostedRoutingProviderMove,
+    onHostedProvidersRefresh,
+    onHostedProviderAuth,
   } = params;
   const config = resolveAgentConfig(configForm, agent.id);
   const workspaceFromFiles =
@@ -453,6 +696,7 @@ function renderAgentOverview(params: {
       ? "Unavailable"
       : "";
   const isDefault = Boolean(defaultId && agent.id === defaultId);
+  const hostedRoutingMode = resolveHostedRoutingUiMode(config.defaults);
   const optimization = resolveAgentOptimizationSummary(configForm, agent.id);
 
   return html`
@@ -524,6 +768,52 @@ function renderAgentOverview(params: {
             />
           </label>
         </div>
+        ${
+          isDefault
+            ? html`
+                <div style="margin-top: 16px;">
+                  <div class="label">Hosted Provider Rotation</div>
+                  <div class="card-sub" style="margin-top: 4px;">
+                    Off by default. When enabled, authenticated hosted providers are tried before the configured model. Explicit session overrides still win.
+                  </div>
+                  <div class="row" style="gap: 12px; flex-wrap: wrap; margin-top: 12px;">
+                    <label class="field" style="min-width: 260px; flex: 1;">
+                      <span>Routing mode</span>
+                      <select
+                        .value=${hostedRoutingMode}
+                        ?disabled=${!configForm || configLoading || configSaving}
+                        @change=${(e: Event) =>
+                          onHostedRoutingModeChange(
+                            (e.target as HTMLSelectElement).value as HostedRoutingUiMode,
+                          )}
+                      >
+                        <option value="off">Off (manual/API/local default)</option>
+                        <option value="prefer-hosted">Prefer hosted, then configured model</option>
+                        <option value="hosted-only">Hosted only</option>
+                      </select>
+                    </label>
+                  </div>
+                  ${renderHostedProviderManager({
+                    defaults: config.defaults,
+                    hostedRoutingMode,
+                    hostedProvidersLoading,
+                    hostedProvidersError,
+                    hostedProvidersResult,
+                    hostedProvidersNotice,
+                    hostedProviderAuthBusy,
+                    configLoading,
+                    configSaving,
+                    configDirty,
+                    onHostedRoutingAppendConfiguredModelsChange,
+                    onHostedRoutingProviderToggle,
+                    onHostedRoutingProviderMove,
+                    onHostedProvidersRefresh,
+                    onHostedProviderAuth,
+                  })}
+                </div>
+              `
+            : nothing
+        }
         <div class="row" style="justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 12px;">
           <div>
             ${
@@ -693,3 +983,7 @@ function formatSubagentSummary(
   ].filter(Boolean);
   return parts.join(" | ");
 }
+
+
+
+

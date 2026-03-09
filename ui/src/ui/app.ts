@@ -72,9 +72,11 @@ import type {
   CronRunLogEntry,
   CronStatus,
   GatewayModelChoice,
+  GatewayWizardStep,
   HealthSnapshot,
   LogEntry,
   LogLevel,
+  ModelsHostedProvidersResult,
   PresenceEntry,
   ChannelsStatusSnapshot,
   SessionsListResult,
@@ -225,6 +227,16 @@ export class OpenClawApp extends LitElement {
   @state() toolsCatalogLoading = false;
   @state() toolsCatalogError: string | null = null;
   @state() toolsCatalogResult: ToolsCatalogResult | null = null;
+  @state() hostedProvidersLoading = false;
+  @state() hostedProvidersError: string | null = null;
+  @state() hostedProvidersResult: ModelsHostedProvidersResult | null = null;
+  @state() hostedProvidersNotice: string | null = null;
+  @state() hostedProviderAuthBusy = false;
+  @state() hostedProviderAuthError: string | null = null;
+  @state() hostedProviderAuthProviderId: string | null = null;
+  @state() hostedProviderAuthSessionId: string | null = null;
+  @state() hostedProviderAuthStep: GatewayWizardStep | null = null;
+  @state() hostedProviderAuthValue: unknown = null;
   @state() agentsPanel: "overview" | "files" | "tools" | "skills" | "channels" | "cron" =
     "overview";
   @state() agentFilesLoading = false;

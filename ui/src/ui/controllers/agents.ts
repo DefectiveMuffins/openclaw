@@ -3,6 +3,11 @@ import type {
   AgentsListResult,
   ConfigSnapshot,
   GatewayModelChoice,
+  GatewayWizardNextResult,
+  GatewayWizardStartResult,
+  GatewayWizardStatus,
+  GatewayWizardStep,
+  ModelsHostedProvidersResult,
   ToolsCatalogResult,
 } from "../types.ts";
 import { updateConfigFormValue, type ConfigFormState } from "./config.ts";
@@ -57,6 +62,16 @@ export type AgentsState = {
   toolsCatalogLoading: boolean;
   toolsCatalogError: string | null;
   toolsCatalogResult: ToolsCatalogResult | null;
+  hostedProvidersLoading: boolean;
+  hostedProvidersError: string | null;
+  hostedProvidersResult: ModelsHostedProvidersResult | null;
+  hostedProvidersNotice: string | null;
+  hostedProviderAuthBusy: boolean;
+  hostedProviderAuthError: string | null;
+  hostedProviderAuthProviderId: string | null;
+  hostedProviderAuthSessionId: string | null;
+  hostedProviderAuthStep: GatewayWizardStep | null;
+  hostedProviderAuthValue: unknown;
 };
 
 function normalizeGatewayModelChoices(models: unknown[]): GatewayModelChoice[] {
@@ -247,6 +262,144 @@ function resolveProvidersConfig(config: Record<string, unknown>): Record<string,
   return providers as Record<string, unknown>;
 }
 
+function resolveHostedRoutingConfig(config: Record<string, unknown>): Record<string, unknown> {
+  const agents = config.agents;
+  if (!agents || typeof agents !== "object" || Array.isArray(agents)) {
+    return {};
+  }
+  const defaults = (agents as { defaults?: unknown }).defaults;
+  if (!defaults || typeof defaults !== "object" || Array.isArray(defaults)) {
+    return {};
+  }
+  const hostedRouting = (defaults as { hostedRouting?: unknown }).hostedRouting;
+  if (!hostedRouting || typeof hostedRouting !== "object" || Array.isArray(hostedRouting)) {
+    return {};
+  }
+  return hostedRouting as Record<string, unknown>;
+}
+
+function resolveBaseConfig(state: ConfigFormState): Record<string, unknown> {
+  const baseConfig =
+    state.configForm && typeof state.configForm === "object"
+      ? state.configForm
+      : state.configSnapshot?.config && typeof state.configSnapshot.config === "object"
+        ? state.configSnapshot.config
+        : {};
+  return baseConfig as Record<string, unknown>;
+}
+
+function normalizeHostedProviderId(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function normalizeHostedProviderOrder(values: unknown): string[] {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const order: string[] = [];
+  for (const entry of values) {
+    const providerId = normalizeHostedProviderId(entry);
+    if (!providerId || seen.has(providerId)) {
+      continue;
+    }
+    seen.add(providerId);
+    order.push(providerId);
+  }
+  return order;
+}
+
+function resolveHostedProviderOrder(state: ConfigFormState, fallbackOrder: string[] = []): string[] {
+  const existing = resolveHostedRoutingConfig(resolveBaseConfig(state));
+  const configured = normalizeHostedProviderOrder(
+    (existing as { providerOrder?: unknown }).providerOrder,
+  );
+  return configured.length > 0 ? configured : normalizeHostedProviderOrder(fallbackOrder);
+}
+
+function resolveFallbackHostedProviderOrder(state: AgentsState): string[] {
+  const effectiveOrder = normalizeHostedProviderOrder(state.hostedProvidersResult?.effectiveOrder);
+  if (effectiveOrder.length > 0) {
+    return effectiveOrder;
+  }
+  return normalizeHostedProviderOrder(
+    state.hostedProvidersResult?.providers?.map((provider) => provider.provider) ?? [],
+  );
+}
+
+function resolveInitialWizardValue(step: GatewayWizardStep | null): unknown {
+  if (!step) {
+    return null;
+  }
+  if (step.type === "multiselect") {
+    return Array.isArray(step.initialValue) ? [...step.initialValue] : [];
+  }
+  if (step.type === "confirm") {
+    return step.initialValue === undefined ? false : Boolean(step.initialValue);
+  }
+  if (step.type === "select") {
+    if (step.initialValue !== undefined) {
+      return step.initialValue;
+    }
+    return step.options?.[0]?.value ?? "";
+  }
+  if (step.type === "text") {
+    return typeof step.initialValue === "string" ? step.initialValue : "";
+  }
+  return step.initialValue ?? null;
+}
+
+function resetHostedProviderAuthState(state: AgentsState) {
+  state.hostedProviderAuthProviderId = null;
+  state.hostedProviderAuthSessionId = null;
+  state.hostedProviderAuthStep = null;
+  state.hostedProviderAuthValue = null;
+}
+
+function applyHostedProviderWizardFrame(
+  state: AgentsState,
+  result: GatewayWizardNextResult,
+  sessionId: string,
+): GatewayWizardStatus | "idle" {
+  if (result.done || !result.step) {
+    const status = result.status ?? (result.error ? "error" : "done");
+    resetHostedProviderAuthState(state);
+    if (status === "done") {
+      state.hostedProvidersNotice = "Provider configured.";
+      return "done";
+    }
+    if (status === "cancelled") {
+      return "cancelled";
+    }
+    state.hostedProviderAuthError = result.error ?? "Provider setup failed.";
+    return status;
+  }
+
+  state.hostedProviderAuthSessionId = sessionId;
+  state.hostedProviderAuthStep = result.step;
+  state.hostedProviderAuthValue = resolveInitialWizardValue(result.step);
+  return "running";
+}
+
+export function updateHostedRoutingMode(
+  state: ConfigFormState,
+  mode: "off" | "prefer-hosted" | "hosted-only",
+) {
+  const baseConfig =
+    state.configForm && typeof state.configForm === "object"
+      ? state.configForm
+      : state.configSnapshot?.config && typeof state.configSnapshot.config === "object"
+        ? state.configSnapshot.config
+        : {};
+  const existing = resolveHostedRoutingConfig(baseConfig as Record<string, unknown>);
+  updateConfigFormValue(state, ["agents", "defaults", "hostedRouting"], {
+    ...existing,
+    enabled: mode !== "off",
+    mode:
+      mode === "off" ? (existing.mode === "hosted-only" ? "hosted-only" : "prefer-hosted") : mode,
+  });
+}
+
 export async function loadAgents(state: AgentsState) {
   if (!state.client || !state.connected) {
     return;
@@ -352,5 +505,162 @@ export async function loadToolsCatalog(state: AgentsState, agentId?: string | nu
     state.toolsCatalogError = String(err);
   } finally {
     state.toolsCatalogLoading = false;
+  }
+}
+
+
+export function updateHostedRoutingAppendConfiguredModels(
+  state: ConfigFormState,
+  enabled: boolean,
+) {
+  const existing = resolveHostedRoutingConfig(resolveBaseConfig(state));
+  updateConfigFormValue(state, ["agents", "defaults", "hostedRouting"], {
+    ...existing,
+    appendConfiguredModels: enabled,
+  });
+}
+
+export function updateHostedRoutingProviderEnabled(
+  state: AgentsState,
+  providerId: string,
+  enabled: boolean,
+) {
+  const normalizedProviderId = normalizeHostedProviderId(providerId);
+  if (!normalizedProviderId) {
+    return;
+  }
+  const order = resolveHostedProviderOrder(state, resolveFallbackHostedProviderOrder(state));
+  const nextOrder = enabled
+    ? order.includes(normalizedProviderId)
+      ? order
+      : [...order, normalizedProviderId]
+    : order.filter((entry) => entry !== normalizedProviderId);
+  updateConfigFormValue(state, ["agents", "defaults", "hostedRouting", "providerOrder"], nextOrder);
+}
+
+export function moveHostedRoutingProvider(
+  state: AgentsState,
+  providerId: string,
+  direction: "up" | "down",
+) {
+  const normalizedProviderId = normalizeHostedProviderId(providerId);
+  if (!normalizedProviderId) {
+    return;
+  }
+  const order = resolveHostedProviderOrder(state, resolveFallbackHostedProviderOrder(state));
+  const index = order.indexOf(normalizedProviderId);
+  if (index < 0) {
+    return;
+  }
+  const targetIndex = direction === "up" ? index - 1 : index + 1;
+  if (targetIndex < 0 || targetIndex >= order.length) {
+    return;
+  }
+  const nextOrder = [...order];
+  [nextOrder[index], nextOrder[targetIndex]] = [nextOrder[targetIndex], nextOrder[index]];
+  updateConfigFormValue(state, ["agents", "defaults", "hostedRouting", "providerOrder"], nextOrder);
+}
+
+export async function loadHostedProviders(state: AgentsState) {
+  if (!state.client || !state.connected) {
+    return;
+  }
+  if (state.hostedProvidersLoading) {
+    return;
+  }
+  state.hostedProvidersLoading = true;
+  state.hostedProvidersError = null;
+  try {
+    const res = await state.client.request<ModelsHostedProvidersResult>("models.hostedProviders", {});
+    state.hostedProvidersResult = res ?? null;
+  } catch (err) {
+    state.hostedProvidersError = String(err);
+    state.hostedProvidersResult = null;
+  } finally {
+    state.hostedProvidersLoading = false;
+  }
+}
+
+export async function startHostedProviderAuth(
+  state: AgentsState,
+  providerId: string,
+): Promise<GatewayWizardStatus | "idle"> {
+  if (!state.client || !state.connected) {
+    return "idle";
+  }
+  if (state.hostedProviderAuthBusy) {
+    return "idle";
+  }
+  if (state.configFormDirty) {
+    state.hostedProviderAuthError = "Save or reload config before changing provider login.";
+    return "idle";
+  }
+  state.hostedProviderAuthBusy = true;
+  state.hostedProviderAuthError = null;
+  state.hostedProvidersNotice = null;
+  try {
+    const res = await state.client.request<GatewayWizardStartResult>("wizard.start", {
+      kind: "hosted-provider-auth",
+      providerId,
+    });
+    state.hostedProviderAuthProviderId = providerId;
+    return applyHostedProviderWizardFrame(state, res, res.sessionId);
+  } catch (err) {
+    state.hostedProviderAuthError = String(err);
+    return "error";
+  } finally {
+    state.hostedProviderAuthBusy = false;
+  }
+}
+
+export async function submitHostedProviderAuthStep(
+  state: AgentsState,
+  value: unknown,
+): Promise<GatewayWizardStatus | "idle"> {
+  if (!state.client || !state.connected) {
+    return "idle";
+  }
+  if (state.hostedProviderAuthBusy) {
+    return "idle";
+  }
+  const sessionId = state.hostedProviderAuthSessionId;
+  const step = state.hostedProviderAuthStep;
+  if (!sessionId || !step) {
+    return "idle";
+  }
+  state.hostedProviderAuthBusy = true;
+  state.hostedProviderAuthError = null;
+  try {
+    const res = await state.client.request<GatewayWizardNextResult>("wizard.next", {
+      sessionId,
+      answer: { stepId: step.id, value },
+    });
+    return applyHostedProviderWizardFrame(state, res, sessionId);
+  } catch (err) {
+    state.hostedProviderAuthError = String(err);
+    return "error";
+  } finally {
+    state.hostedProviderAuthBusy = false;
+  }
+}
+
+export async function cancelHostedProviderAuth(state: AgentsState) {
+  if (!state.client || !state.connected) {
+    resetHostedProviderAuthState(state);
+    return;
+  }
+  const sessionId = state.hostedProviderAuthSessionId;
+  resetHostedProviderAuthState(state);
+  if (!sessionId || state.hostedProviderAuthBusy) {
+    return;
+  }
+  state.hostedProviderAuthBusy = true;
+  state.hostedProviderAuthError = null;
+  try {
+    await state.client.request("wizard.cancel", { sessionId });
+  } catch (err) {
+    state.hostedProviderAuthError = String(err);
+  } finally {
+    state.hostedProviderAuthBusy = false;
   }
 }

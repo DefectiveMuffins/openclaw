@@ -146,12 +146,13 @@ export function createFollowupRunner(params: {
           provider: queued.run.provider,
           model: queued.run.model,
           agentDir: queued.run.agentDir,
+          hostedRoutingEligible: queued.run.hostedRoutingEligible,
           fallbacksOverride: resolveRunModelFallbacksOverride({
             cfg: queued.run.config,
             agentId: queued.run.agentId,
             sessionKey: queued.run.sessionKey,
           }),
-          run: (provider, model) => {
+          run: (provider, model, fallbackContext = { attempt: 1, total: 1 }) => {
             const authProfile = resolveRunAuthProfile(queued.run, provider);
             return runEmbeddedPiAgent({
               sessionId: queued.run.sessionId,
@@ -178,6 +179,7 @@ export function createFollowupRunner(params: {
               extraSystemPrompt: queued.run.extraSystemPrompt,
               ownerNumbers: queued.run.ownerNumbers,
               enforceFinalTag: queued.run.enforceFinalTag,
+              modelFallbackEnabled: fallbackContext.total > 1,
               provider,
               model,
               ...authProfile,
@@ -308,7 +310,7 @@ export function createFollowupRunner(params: {
         if (queued.run.verboseLevel && queued.run.verboseLevel !== "off") {
           const suffix = typeof count === "number" ? ` (count ${count})` : "";
           finalPayloads.unshift({
-            text: `🧹 Auto-compaction complete${suffix}.`,
+            text: `ðŸ§¹ Auto-compaction complete${suffix}.`,
           });
         }
       }
@@ -318,7 +320,7 @@ export function createFollowupRunner(params: {
       // Both signals are required for the typing controller to clean up.
       // The main inbound dispatch path calls markDispatchIdle() from the
       // buffered dispatcher's finally block, but followup turns bypass the
-      // dispatcher entirely — so we must fire both signals here.  Without
+      // dispatcher entirely â€” so we must fire both signals here.  Without
       // this, NO_REPLY / empty-payload followups leave the typing indicator
       // stuck (the keepalive loop keeps sending "typing" to Telegram
       // indefinitely until the TTL expires).

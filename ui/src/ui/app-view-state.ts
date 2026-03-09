@@ -18,9 +18,11 @@ import type {
   ConfigSnapshot,
   ConfigUiHints,
   GatewayModelChoice,
+  GatewayWizardStep,
   HealthSnapshot,
   LogEntry,
   LogLevel,
+  ModelsHostedProvidersResult,
   NostrProfile,
   PresenceEntry,
   SessionsUsageResult,
@@ -136,6 +138,16 @@ export type AppViewState = {
   toolsCatalogLoading: boolean;
   toolsCatalogError: string | null;
   toolsCatalogResult: ToolsCatalogResult | null;
+  hostedProvidersLoading: boolean;
+  hostedProvidersError: string | null;
+  hostedProvidersResult: ModelsHostedProvidersResult | null;
+  hostedProvidersNotice: string | null;
+  hostedProviderAuthBusy: boolean;
+  hostedProviderAuthError: string | null;
+  hostedProviderAuthProviderId: string | null;
+  hostedProviderAuthSessionId: string | null;
+  hostedProviderAuthStep: GatewayWizardStep | null;
+  hostedProviderAuthValue: unknown;
   agentsPanel: "overview" | "files" | "tools" | "skills" | "channels" | "cron";
   agentFilesLoading: boolean;
   agentFilesError: string | null;

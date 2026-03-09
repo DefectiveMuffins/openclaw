@@ -1,3 +1,4 @@
+import { applyHostedRoutingOnboardingConfig } from "../agents/hosted-routing.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import type {
   GatewayAuthChoice,
@@ -18,6 +19,14 @@ import { resolveUserPath } from "../utils.js";
 import type { QuickstartGatewayDefaults, WizardFlow } from "./onboarding.types.js";
 import { WizardCancelledError, type WizardPrompter } from "./prompts.js";
 
+function parseHostedProviderOrder(raw?: string): string[] | undefined {
+  const values = raw
+    ?.split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return values && values.length > 0 ? values : undefined;
+}
+
 async function requireRiskAcknowledgement(params: {
   opts: OnboardOptions;
   prompter: WizardPrompter;
@@ -28,7 +37,7 @@ async function requireRiskAcknowledgement(params: {
 
   await params.prompter.note(
     [
-      "Security warning — please read.",
+      "Security warning â€” please read.",
       "",
       "OpenClaw is a hobby project and still in beta. Expect sharp edges.",
       "By default, OpenClaw is a personal agent: one trusted operator boundary.",
@@ -38,7 +47,7 @@ async function requireRiskAcknowledgement(params: {
       "OpenClaw is not a hostile multi-tenant boundary by default.",
       "If multiple users can message one tool-enabled agent, they share that delegated tool authority.",
       "",
-      "If you’re not comfortable with security hardening and access control, don’t run OpenClaw.",
+      "If youâ€™re not comfortable with security hardening and access control, donâ€™t run OpenClaw.",
       "Ask someone experienced to help before enabling tools or exposing it to the internet.",
       "",
       "Recommended baseline:",
@@ -46,7 +55,7 @@ async function requireRiskAcknowledgement(params: {
       "- Multi-user/shared inbox: split trust boundaries (separate gateway/credentials, ideally separate OS users/hosts).",
       "- Sandbox + least-privilege tools.",
       "- Shared inboxes: isolate DM sessions (`session.dmScope: per-channel-peer`) and keep tool access minimal.",
-      "- Keep secrets out of the agent’s reachable filesystem.",
+      "- Keep secrets out of the agentâ€™s reachable filesystem.",
       "- Use the strongest available model for any bot with tools or untrusted inboxes.",
       "",
       "Run regularly:",
@@ -400,6 +409,13 @@ export async function runOnboardingWizard(
     if (modelSelection.model) {
       nextConfig = applyPrimaryModel(nextConfig, modelSelection.model);
     }
+  }
+
+  if (opts.preferHosted) {
+    nextConfig = applyHostedRoutingOnboardingConfig({
+      cfg: nextConfig,
+      providerOrder: parseHostedProviderOrder(opts.hostedProviderOrder),
+    });
   }
 
   await warnIfModelConfigLooksOff(nextConfig, prompter);

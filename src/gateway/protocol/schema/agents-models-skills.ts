@@ -1,6 +1,31 @@
 import { Type } from "@sinclair/typebox";
 import { NonEmptyString } from "./primitives.js";
 
+const HostedRoutingModeSchema = Type.Union([
+  Type.Literal("prefer-hosted"),
+  Type.Literal("hosted-only"),
+]);
+
+const HostedProviderAuthModeSchema = Type.Union([
+  Type.Literal("api-key"),
+  Type.Literal("oauth"),
+  Type.Literal("token"),
+  Type.Literal("mixed"),
+]);
+
+const HostedProviderRiskLabelSchema = Type.Union([
+  Type.Literal("official"),
+  Type.Literal("unofficial"),
+]);
+
+const HostedRoutingSkipReasonSchema = Type.Union([
+  Type.Literal("no auth"),
+  Type.Literal("not allowlisted"),
+  Type.Literal("plugin removed"),
+  Type.Literal("model missing from catalog"),
+  Type.Literal("unknown provider"),
+]);
+
 export const ModelChoiceSchema = Type.Object(
   {
     id: NonEmptyString,
@@ -8,6 +33,21 @@ export const ModelChoiceSchema = Type.Object(
     provider: NonEmptyString,
     contextWindow: Type.Optional(Type.Integer({ minimum: 1 })),
     reasoning: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+
+export const HostedProviderStatusSchema = Type.Object(
+  {
+    provider: NonEmptyString,
+    label: NonEmptyString,
+    modelRef: NonEmptyString,
+    authMode: HostedProviderAuthModeSchema,
+    riskLabel: HostedProviderRiskLabelSchema,
+    docsUrl: NonEmptyString,
+    optInOnly: Type.Boolean(),
+    available: Type.Boolean(),
+    skipReasons: Type.Array(HostedRoutingSkipReasonSchema),
   },
   { additionalProperties: false },
 );
@@ -174,6 +214,20 @@ export const ModelsListParamsSchema = Type.Object(
 export const ModelsListResultSchema = Type.Object(
   {
     models: Type.Array(ModelChoiceSchema),
+  },
+  { additionalProperties: false },
+);
+
+export const ModelsHostedProvidersParamsSchema = Type.Object({}, { additionalProperties: false });
+
+export const ModelsHostedProvidersResultSchema = Type.Object(
+  {
+    enabled: Type.Boolean(),
+    mode: HostedRoutingModeSchema,
+    configuredOrder: Type.Array(NonEmptyString),
+    effectiveOrder: Type.Array(NonEmptyString),
+    appendConfiguredModels: Type.Boolean(),
+    providers: Type.Array(HostedProviderStatusSchema),
   },
   { additionalProperties: false },
 );

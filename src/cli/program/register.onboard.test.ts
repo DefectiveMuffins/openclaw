@@ -129,6 +129,23 @@ describe("registerOnboardCommand", () => {
     );
   });
 
+  it("forwards hosted routing flags", async () => {
+    await runCli([
+      "onboard",
+      "--prefer-hosted",
+      "--hosted-provider-order",
+      "google,qwen-portal,moonshot",
+    ]);
+
+    expect(onboardCommandMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preferHosted: true,
+        hostedProviderOrder: "google,qwen-portal,moonshot",
+      }),
+      runtime,
+    );
+  });
+
   it("reports errors via runtime on onboard command failures", async () => {
     onboardCommandMock.mockRejectedValueOnce(new Error("onboard failed"));
 

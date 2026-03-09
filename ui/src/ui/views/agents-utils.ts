@@ -13,6 +13,8 @@ import type {
   AgentsFilesListResult,
   AgentsListResult,
   GatewayModelChoice,
+  HostedProviderStatus,
+  ModelsHostedProvidersResult,
 } from "../types.ts";
 
 export const TOOL_SECTIONS = listCoreToolSections();
@@ -58,6 +60,15 @@ type AgentModelRoutingConfig = {
   };
 };
 
+type AgentHostedRoutingConfig = {
+  enabled?: boolean;
+  mode?: "prefer-hosted" | "hosted-only";
+  providerOrder?: string[];
+  appendConfiguredModels?: boolean;
+};
+
+export type HostedRoutingUiMode = "off" | "prefer-hosted" | "hosted-only";
+
 type AgentSubagentDelegationConfig = {
   enabled?: boolean;
   structuredResults?: boolean;
@@ -96,6 +107,7 @@ type AgentDefaultsConfig = {
   workspace?: string;
   model?: unknown;
   models?: Record<string, { alias?: string }>;
+  hostedRouting?: AgentHostedRoutingConfig;
   thinkingDefault?: string;
   skills?: AgentSkillsConfig;
   memorySearch?: AgentMemorySearchConfig;
@@ -318,6 +330,139 @@ export function resolveEffectiveModelFallbacks(
   defaultModel?: unknown,
 ): string[] | null {
   return resolveModelFallbacks(entryModel) ?? resolveModelFallbacks(defaultModel);
+}
+
+export function resolveHostedRoutingUiMode(defaults?: {
+  hostedRouting?: AgentHostedRoutingConfig;
+}): HostedRoutingUiMode {
+  if (defaults?.hostedRouting?.enabled !== true) {
+    return "off";
+  }
+  return defaults.hostedRouting.mode === "hosted-only" ? "hosted-only" : "prefer-hosted";
+}
+
+
+function normalizeHostedProviderId(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function normalizeHostedProviderStatuses(providers?: HostedProviderStatus[] | null): HostedProviderStatus[] {
+  if (!Array.isArray(providers)) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const normalized: HostedProviderStatus[] = [];
+  for (const provider of providers) {
+    const providerId = normalizeHostedProviderId(provider?.provider);
+    if (!providerId || seen.has(providerId)) {
+      continue;
+    }
+    seen.add(providerId);
+    normalized.push(provider);
+  }
+  return normalized;
+}
+
+export function resolveHostedRoutingProviderOrder(
+  defaults?: AgentDefaultsConfig,
+  hostedProviders?: ModelsHostedProvidersResult | null,
+): string[] {
+  const configured = normalizeStringList(defaults?.hostedRouting?.providerOrder).map((provider) =>
+    normalizeHostedProviderId(provider),
+  );
+  const configuredOrder = configured.filter(Boolean);
+  if (configuredOrder.length > 0) {
+    return Array.from(new Set(configuredOrder));
+  }
+  const effectiveOrder = normalizeStringList(hostedProviders?.effectiveOrder).map((provider) =>
+    normalizeHostedProviderId(provider),
+  );
+  const normalizedEffectiveOrder = effectiveOrder.filter(Boolean);
+  if (normalizedEffectiveOrder.length > 0) {
+    return Array.from(new Set(normalizedEffectiveOrder));
+  }
+  return normalizeHostedProviderStatuses(hostedProviders?.providers).map((provider) =>
+    normalizeHostedProviderId(provider.provider),
+  );
+}
+
+export function resolveHostedRoutingAppendConfiguredModels(
+  defaults?: AgentDefaultsConfig,
+  hostedProviders?: ModelsHostedProvidersResult | null,
+): boolean {
+  if (typeof defaults?.hostedRouting?.appendConfiguredModels === "boolean") {
+    return defaults.hostedRouting.appendConfiguredModels;
+  }
+  return hostedProviders?.appendConfiguredModels !== false;
+}
+
+export function isHostedProviderSelected(
+  providerId: string,
+  defaults?: AgentDefaultsConfig,
+  hostedProviders?: ModelsHostedProvidersResult | null,
+): boolean {
+  const normalizedProviderId = normalizeHostedProviderId(providerId);
+  if (!normalizedProviderId) {
+    return false;
+  }
+  return resolveHostedRoutingProviderOrder(defaults, hostedProviders).includes(normalizedProviderId);
+}
+
+export function orderHostedProviders(
+  defaults?: AgentDefaultsConfig,
+  hostedProviders?: ModelsHostedProvidersResult | null,
+): HostedProviderStatus[] {
+  const providers = normalizeHostedProviderStatuses(hostedProviders?.providers);
+  const order = resolveHostedRoutingProviderOrder(defaults, hostedProviders);
+  const orderIndex = new Map(order.map((provider, index) => [provider, index]));
+  return providers.toSorted((left, right) => {
+    const leftId = normalizeHostedProviderId(left.provider);
+    const rightId = normalizeHostedProviderId(right.provider);
+    const leftIndex = orderIndex.get(leftId);
+    const rightIndex = orderIndex.get(rightId);
+    const leftSelected = leftIndex !== undefined;
+    const rightSelected = rightIndex !== undefined;
+    if (leftSelected && rightSelected) {
+      return leftIndex - rightIndex;
+    }
+    if (leftSelected) {
+      return -1;
+    }
+    if (rightSelected) {
+      return 1;
+    }
+    const labelCmp = left.label.localeCompare(right.label);
+    if (labelCmp !== 0) {
+      return labelCmp;
+    }
+    return left.provider.localeCompare(right.provider);
+  });
+}
+
+export function formatHostedProviderStatus(provider: HostedProviderStatus): string {
+  if (provider.available) {
+    return "Ready";
+  }
+  if (provider.skipReasons.includes("no auth")) {
+    return "Not signed in";
+  }
+  if (provider.skipReasons.includes("not allowlisted")) {
+    return "Blocked by allowlist";
+  }
+  if (provider.skipReasons.includes("model missing from catalog")) {
+    return "Model unavailable";
+  }
+  if (provider.skipReasons.includes("plugin removed")) {
+    return "Plugin unavailable";
+  }
+  return "Unavailable";
+}
+
+export function formatHostedProviderSkipReasons(provider: HostedProviderStatus): string {
+  if (provider.skipReasons.length === 0) {
+    return "Authenticated and available for hosted rotation.";
+  }
+  return provider.skipReasons.join(", ");
 }
 
 export type AgentOptimizationSummary = {

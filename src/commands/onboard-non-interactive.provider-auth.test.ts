@@ -41,7 +41,18 @@ let upsertAuthProfile: typeof import("../agents/auth-profiles.js").upsertAuthPro
 
 type ProviderAuthConfigSnapshot = {
   auth?: { profiles?: Record<string, { provider?: string; mode?: string }> };
-  agents?: { defaults?: { model?: { primary?: string } } };
+  agents?: {
+    defaults?: {
+      model?: { primary?: string };
+      hostedRouting?: {
+        enabled?: boolean;
+        mode?: string;
+        providerOrder?: string[];
+        appendConfiguredModels?: boolean;
+      };
+      models?: Record<string, { alias?: string }>;
+    };
+  };
   models?: {
     providers?: Record<
       string,
@@ -737,5 +748,46 @@ describe("onboard (non-interactive): provider auth", () => {
         ).rejects.toThrow('Auth choice "custom-api-key" requires a base URL and model ID.');
       },
     );
+  });
+
+  it("writes hosted routing config and extends an existing allowlist", async () => {
+    await withOnboardEnv("openclaw-onboard-hosted-routing-", async (env) => {
+      await fs.writeFile(
+        env.configPath,
+        JSON.stringify(
+          {
+            agents: {
+              defaults: {
+                models: {
+                  "openai/gpt-5.1": { alias: "GPT" },
+                },
+              },
+            },
+          },
+          null,
+          2,
+        ),
+      );
+
+      const cfg = await runOnboardingAndReadConfig(env, {
+        authChoice: "gemini-api-key",
+        geminiApiKey: "gemini-test-key",
+        preferHosted: true,
+        hostedProviderOrder: "google,qwen-portal,moonshot",
+      });
+
+      expect(cfg.agents?.defaults?.hostedRouting).toEqual({
+        enabled: true,
+        mode: "prefer-hosted",
+        providerOrder: ["google", "qwen-portal", "moonshot"],
+        appendConfiguredModels: true,
+      });
+      expect(cfg.agents?.defaults?.models).toMatchObject({
+        "openai/gpt-5.1": { alias: "GPT" },
+        "google/gemini-3-pro-preview": {},
+        "qwen-portal/coder-model": {},
+        "moonshot/kimi-k2.5": {},
+      });
+    });
   });
 });

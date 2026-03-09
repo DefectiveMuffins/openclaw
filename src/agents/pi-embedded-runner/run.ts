@@ -8,6 +8,7 @@ import { enqueueCommandInLane } from "../../process/command-queue.js";
 import { isMarkdownCapableMessageChannel } from "../../utils/message-channel.js";
 import { resolveOpenClawAgentDir } from "../agent-paths.js";
 import { hasConfiguredModelFallbacks } from "../agent-scope.js";
+import { collectProviderApiKeysForExecution } from "../api-key-rotation.js";
 import {
   isProfileInCooldown,
   markAuthProfileFailure,
@@ -273,11 +274,13 @@ export async function runEmbeddedPiAgent(
         }
       }
       const agentDir = params.agentDir ?? resolveOpenClawAgentDir();
-      const fallbackConfigured = hasConfiguredModelFallbacks({
-        cfg: params.config,
-        agentId: params.agentId,
-        sessionKey: params.sessionKey,
-      });
+      const fallbackConfigured =
+        params.modelFallbackEnabled ??
+        hasConfiguredModelFallbacks({
+          cfg: params.config,
+          agentId: params.agentId,
+          sessionKey: params.sessionKey,
+        });
       await ensureOpenClawModelsJson(params.config, agentDir);
 
       // Run before_model_resolve hooks early so plugins can override the
@@ -419,6 +422,8 @@ export async function runEmbeddedPiAgent(
       const attemptedThinking = new Set<ThinkLevel>();
       let apiKeyInfo: ApiKeyInfo | null = null;
       let lastProfileId: string | undefined;
+      let executionApiKeys: string[] = [];
+      let apiKeyAttemptIndex = 0;
       const copilotTokenState: CopilotTokenState | null =
         model.provider === "github-copilot" ? { githubToken: "", expiresAt: 0 } : null;
       let copilotRefreshCancelled = false;
@@ -579,9 +584,33 @@ export async function runEmbeddedPiAgent(
         });
       };
 
+      const resetExecutionApiKeys = () => {
+        executionApiKeys = [];
+        apiKeyAttemptIndex = 0;
+      };
+
+      const applyRuntimeApiKey = async (apiKey: string): Promise<void> => {
+        if (model.provider === "github-copilot") {
+          const { resolveCopilotApiToken } =
+            await import("../../providers/github-copilot-token.js");
+          const copilotToken = await resolveCopilotApiToken({
+            githubToken: apiKey,
+          });
+          authStorage.setRuntimeApiKey(model.provider, copilotToken.token);
+          if (copilotTokenState) {
+            copilotTokenState.githubToken = apiKey;
+            copilotTokenState.expiresAt = copilotToken.expiresAt;
+            scheduleCopilotRefresh();
+          }
+          return;
+        }
+        authStorage.setRuntimeApiKey(model.provider, apiKey);
+      };
+
       const applyApiKeyInfo = async (candidate?: string): Promise<void> => {
         apiKeyInfo = await resolveApiKeyForCandidate(candidate);
         const resolvedProfileId = apiKeyInfo.profileId ?? candidate;
+        resetExecutionApiKeys();
         if (!apiKeyInfo.apiKey) {
           if (apiKeyInfo.mode !== "aws-sdk") {
             throw new Error(
@@ -591,25 +620,45 @@ export async function runEmbeddedPiAgent(
           lastProfileId = resolvedProfileId;
           return;
         }
-        if (model.provider === "github-copilot") {
-          const { resolveCopilotApiToken } =
-            await import("../../providers/github-copilot-token.js");
-          const copilotToken = await resolveCopilotApiToken({
-            githubToken: apiKeyInfo.apiKey,
+
+        if (!apiKeyInfo.profileId && apiKeyInfo.mode === "api-key") {
+          executionApiKeys = collectProviderApiKeysForExecution({
+            provider: model.provider,
+            primaryApiKey: apiKeyInfo.apiKey,
           });
-          authStorage.setRuntimeApiKey(model.provider, copilotToken.token);
-          if (copilotTokenState) {
-            copilotTokenState.githubToken = apiKeyInfo.apiKey;
-            copilotTokenState.expiresAt = copilotToken.expiresAt;
-            scheduleCopilotRefresh();
-          }
-        } else {
-          authStorage.setRuntimeApiKey(model.provider, apiKeyInfo.apiKey);
         }
+        const runtimeApiKey = executionApiKeys[apiKeyAttemptIndex] ?? apiKeyInfo.apiKey;
+        await applyRuntimeApiKey(runtimeApiKey);
         lastProfileId = apiKeyInfo.profileId;
       };
 
-      const advanceAuthProfile = async (): Promise<boolean> => {
+      const advanceExecutionApiKey = async (reason?: FailoverReason): Promise<boolean> => {
+        if (reason !== "rate_limit" && reason !== "billing") {
+          return false;
+        }
+        if (lastProfileId || executionApiKeys.length === 0) {
+          return false;
+        }
+        const nextIndex = apiKeyAttemptIndex + 1;
+        if (nextIndex >= executionApiKeys.length) {
+          return false;
+        }
+        const nextApiKey = executionApiKeys[nextIndex];
+        if (!nextApiKey) {
+          return false;
+        }
+        apiKeyAttemptIndex = nextIndex;
+        await applyRuntimeApiKey(nextApiKey);
+        if (!isProbeSession) {
+          log.warn(`Provider ${provider} hit ${reason}. Trying next API key...`);
+        }
+        return true;
+      };
+
+      const advanceAuthProfile = async (reason?: FailoverReason): Promise<boolean> => {
+        if (await advanceExecutionApiKey(reason)) {
+          return true;
+        }
         if (lockedProfileId) {
           return false;
         }
@@ -1153,7 +1202,7 @@ export async function runEmbeddedPiAgent(
             if (
               isFailoverErrorMessage(errorText) &&
               promptFailoverReason !== "timeout" &&
-              (await advanceAuthProfile())
+              (await advanceAuthProfile(promptFailoverReason ?? undefined))
             ) {
               continue;
             }
@@ -1259,7 +1308,11 @@ export async function runEmbeddedPiAgent(
               }
             }
 
-            const rotated = await advanceAuthProfile();
+            const rotationReason =
+              timedOut || assistantFailoverReason === "timeout"
+                ? "timeout"
+                : (assistantFailoverReason ?? "unknown");
+            const rotated = await advanceAuthProfile(rotationReason);
             if (rotated) {
               continue;
             }

@@ -41,6 +41,7 @@ import {
 import type { AgentDefaultsConfig } from "../../config/types.js";
 import { registerAgentRunContext } from "../../infra/agent-events.js";
 import { logWarn } from "../../logger.js";
+import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
 import {
   buildSafeExternalPrompt,
@@ -169,7 +170,7 @@ export async function runCronIsolatedAgentTurn(params: {
     }
     return catalog;
   };
-  // Isolated cron sessions are subagents — prefer subagents.model when set,
+  // Isolated cron sessions are subagents â€” prefer subagents.model when set,
   // but only if it passes the model allowlist.  #11461
   const subagentModelRaw =
     normalizeModelSelection(agentConfigOverride?.subagents?.model) ??
@@ -277,9 +278,10 @@ export async function runCronIsolatedAgentTurn(params: {
     cronSession.sessionEntry.label = `Cron: ${labelSuffix}`;
   }
 
-  // Respect session model override — check session.modelOverride before falling
+  // Respect session model override â€” check session.modelOverride before falling
   // back to the default config model. This ensures /model changes are honoured
   // by cron and isolated agent runs.
+  let sessionModelOverrideApplied = false;
   if (!modelOverride && !hooksGmailModelApplied) {
     const sessionModelOverride = cronSession.sessionEntry.modelOverride?.trim();
     if (sessionModelOverride) {
@@ -295,6 +297,7 @@ export async function runCronIsolatedAgentTurn(params: {
       if (!("error" in resolvedSessionOverride)) {
         provider = resolvedSessionOverride.ref.provider;
         model = resolvedSessionOverride.ref.model;
+        sessionModelOverrideApplied = true;
       }
     }
   }
@@ -445,6 +448,13 @@ export async function runCronIsolatedAgentTurn(params: {
       verboseLevel: resolvedVerboseLevel,
     });
     const messageChannel = resolvedDelivery.channel;
+    const hookRunner = getGlobalHookRunner();
+    const hostedRoutingEligible =
+      !modelOverride &&
+      !hooksGmailModelApplied &&
+      !sessionModelOverrideApplied &&
+      !hookRunner?.hasHooks("before_model_resolve") &&
+      !hookRunner?.hasHooks("before_agent_start");
     // Per-job payload.fallbacks takes priority over agent-level fallbacks.
     const payloadFallbacks =
       params.job.payload.kind === "agentTurn" && Array.isArray(params.job.payload.fallbacks)
@@ -455,9 +465,10 @@ export async function runCronIsolatedAgentTurn(params: {
       provider,
       model,
       agentDir,
+      hostedRoutingEligible,
       fallbacksOverride:
         payloadFallbacks ?? resolveAgentModelFallbacksOverride(params.cfg, agentId),
-      run: (providerOverride, modelOverride) => {
+      run: (providerOverride, modelOverride, fallbackContext = { attempt: 1, total: 1 }) => {
         if (abortSignal?.aborted) {
           throw new Error(abortReason());
         }
@@ -501,6 +512,7 @@ export async function runCronIsolatedAgentTurn(params: {
           lane: params.lane ?? "cron",
           provider: providerOverride,
           model: modelOverride,
+          modelFallbackEnabled: fallbackContext.total > 1,
           authProfileId,
           authProfileIdSource,
           thinkLevel,

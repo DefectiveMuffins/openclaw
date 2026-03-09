@@ -13,13 +13,13 @@ title: "Plugins"
 A plugin is just a **small code module** that extends OpenClaw with extra
 features (commands, tools, and Gateway RPC).
 
-Most of the time, you’ll use plugins when you want a feature that’s not built
+Most of the time, youâ€™ll use plugins when you want a feature thatâ€™s not built
 into core OpenClaw yet (or you want to keep optional features out of your main
 install).
 
 Fast path:
 
-1. See what’s already loaded:
+1. See whatâ€™s already loaded:
 
 ```bash
 openclaw plugins list
@@ -42,18 +42,17 @@ Looking for third-party listings? See [Community plugins](/plugins/community).
 ## Available plugins (official)
 
 - Microsoft Teams is plugin-only as of 2026.1.15; install `@openclaw/msteams` if you use Teams.
-- Memory (Core) — bundled memory search plugin (enabled by default via `plugins.slots.memory`)
-- Memory (LanceDB) — bundled long-term memory plugin (auto-recall/capture; set `plugins.slots.memory = "memory-lancedb"`)
-- [Voice Call](/plugins/voice-call) — `@openclaw/voice-call`
-- [Zalo Personal](/plugins/zalouser) — `@openclaw/zalouser`
-- [Matrix](/channels/matrix) — `@openclaw/matrix`
-- [Nostr](/channels/nostr) — `@openclaw/nostr`
-- [Zalo](/channels/zalo) — `@openclaw/zalo`
-- [Microsoft Teams](/channels/msteams) — `@openclaw/msteams`
-- Google Antigravity OAuth (provider auth) — bundled as `google-antigravity-auth` (disabled by default)
-- Gemini CLI OAuth (provider auth) — bundled as `google-gemini-cli-auth` (disabled by default)
-- Qwen OAuth (provider auth) — bundled as `qwen-portal-auth` (disabled by default)
-- Copilot Proxy (provider auth) — local VS Code Copilot Proxy bridge; distinct from built-in `github-copilot` device login (bundled, disabled by default)
+- Memory (Core) â€” bundled memory search plugin (enabled by default via `plugins.slots.memory`)
+- Memory (LanceDB) â€” bundled long-term memory plugin (auto-recall/capture; set `plugins.slots.memory = "memory-lancedb"`)
+- [Voice Call](/plugins/voice-call) â€” `@openclaw/voice-call`
+- [Zalo Personal](/plugins/zalouser) â€” `@openclaw/zalouser`
+- [Matrix](/channels/matrix) â€” `@openclaw/matrix`
+- [Nostr](/channels/nostr) â€” `@openclaw/nostr`
+- [Zalo](/channels/zalo) â€” `@openclaw/zalo`
+- [Microsoft Teams](/channels/msteams) â€” `@openclaw/msteams`
+- Gemini CLI OAuth (provider auth) â€” bundled as `google-gemini-cli-auth` (disabled by default)
+- Qwen OAuth (provider auth) â€” bundled as `qwen-portal-auth` (disabled by default)
+- Copilot Proxy (provider auth) â€” local VS Code Copilot Proxy bridge; distinct from built-in `github-copilot` device login (bundled, disabled by default)
 
 OpenClaw plugins are **TypeScript modules** loaded at runtime via jiti. **Config
 validation does not execute plugin code**; it uses the plugin manifest and JSON
@@ -70,7 +69,7 @@ Plugins can register:
 - **Skills** (by listing `skills` directories in the plugin manifest)
 - **Auto-reply commands** (execute without invoking the AI agent)
 
-Plugins run **in‑process** with the Gateway, so treat them as trusted code.
+Plugins run **inâ€‘process** with the Gateway, so treat them as trusted code.
 Tool authoring guide: [Plugin agent tools](/plugins/agent-tools).
 
 ## Runtime helpers
@@ -206,9 +205,9 @@ contain `{ "entries": [ { "name": "@scope/pkg", "openclaw": { "channel": {...}, 
 Default plugin ids:
 
 - Package packs: `package.json` `name`
-- Standalone file: file base name (`~/.../voice-call.ts` → `voice-call`)
+- Standalone file: file base name (`~/.../voice-call.ts` â†’ `voice-call`)
 
-If a plugin exports `id`, OpenClaw uses it but warns when it doesn’t match the
+If a plugin exports `id`, OpenClaw uses it but warns when it doesnâ€™t match the
 configured id.
 
 ## Config
@@ -233,7 +232,7 @@ Fields:
 - `allow`: allowlist (optional)
 - `deny`: denylist (optional; deny wins)
 - `load.paths`: extra plugin files/dirs
-- `entries.<id>`: per‑plugin toggles + config
+- `entries.<id>`: perâ€‘plugin toggles + config
 
 Config changes **require a gateway restart**.
 
@@ -319,7 +318,7 @@ openclaw plugins doctor
 `plugins update` only works for npm installs tracked under `plugins.installs`.
 If stored integrity metadata changes between updates, OpenClaw warns and asks for confirmation (use global `--yes` to bypass prompts).
 
-Plugins may also register their own top‑level commands (example: `openclaw voicecall`).
+Plugins may also register their own topâ€‘level commands (example: `openclaw voicecall`).
 
 ## Plugin API (overview)
 
@@ -410,7 +409,7 @@ Notes:
 
 ### Register a messaging channel
 
-Plugins can register **channel plugins** that behave like built‑in channels
+Plugins can register **channel plugins** that behave like builtâ€‘in channels
 (WhatsApp, Telegram, etc.). Channel config lives under `channels.<id>` and is
 validated by your channel plugin code.
 
@@ -475,7 +474,7 @@ Context details:
 - Returning `"skip"` leaves selection and account tracking unchanged.
 - Returning `{ cfg, accountId? }` applies config updates and records account selection.
 
-### Write a new messaging channel (step‑by‑step)
+### Write a new messaging channel (stepâ€‘byâ€‘step)
 
 Use this when you want a **new chat surface** (a "messaging channel"), not a model provider.
 Model provider docs live under `/providers/*`.
@@ -483,7 +482,7 @@ Model provider docs live under `/providers/*`.
 1. Pick an id + config shape
 
 - All channel config lives under `channels.<id>`.
-- Prefer `channels.<id>.accounts.<accountId>` for multi‑account setups.
+- Prefer `channels.<id>.accounts.<accountId>` for multiâ€‘account setups.
 
 2. Define the channel metadata
 
@@ -522,7 +521,7 @@ Minimal config example:
 }
 ```
 
-Minimal channel plugin (outbound‑only):
+Minimal channel plugin (outboundâ€‘only):
 
 ```ts
 const plugin = {
@@ -671,7 +670,7 @@ export default function (api) {
 
 Plugins can ship a skill in the repo (`skills/<name>/SKILL.md`).
 Enable it with `plugins.entries.<id>.enabled` (or other config gates) and ensure
-it’s present in your workspace/managed skills locations.
+itâ€™s present in your workspace/managed skills locations.
 
 ## Distribution (npm)
 
@@ -689,7 +688,7 @@ Publishing contract:
 
 ## Example plugin: Voice Call
 
-This repo includes a voice‑call plugin (Twilio or log fallback):
+This repo includes a voiceâ€‘call plugin (Twilio or log fallback):
 
 - Source: `extensions/voice-call`
 - Skill: `skills/voice-call`

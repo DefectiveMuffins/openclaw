@@ -9,7 +9,12 @@ import { scheduleChatScroll, scheduleLogsScroll } from "./app-scroll.ts";
 import type { OpenClawApp } from "./app.ts";
 import { loadAgentIdentities, loadAgentIdentity } from "./controllers/agent-identity.ts";
 import { loadAgentSkills } from "./controllers/agent-skills.ts";
-import { loadAgentModelChoices, loadAgents, loadToolsCatalog } from "./controllers/agents.ts";
+import {
+  loadAgentModelChoices,
+  loadAgents,
+  loadHostedProviders,
+  loadToolsCatalog,
+} from "./controllers/agents.ts";
 import { loadChannels } from "./controllers/channels.ts";
 import { loadConfig, loadConfigSchema } from "./controllers/config.ts";
 import {
@@ -188,6 +193,7 @@ export async function refreshActiveTab(host: SettingsHost) {
   if (host.tab === "agents") {
     await loadAgents(host as unknown as OpenClawApp);
     await loadAgentModelChoices(host as unknown as OpenClawApp);
+    await loadHostedProviders(host as unknown as OpenClawApp);
     await loadToolsCatalog(host as unknown as OpenClawApp);
     await loadConfig(host as unknown as OpenClawApp);
     const agentIds = host.agentsList?.agents?.map((entry) => entry.id) ?? [];

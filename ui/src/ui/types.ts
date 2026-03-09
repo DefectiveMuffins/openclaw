@@ -337,6 +337,60 @@ export type GatewayModelChoice = {
   input?: Array<"text" | "image" | "document">;
 };
 
+export type HostedProviderStatus = {
+  provider: string;
+  label: string;
+  modelRef: string;
+  authMode: "api-key" | "oauth" | "token" | "mixed";
+  riskLabel: "official" | "unofficial";
+  docsUrl: string;
+  optInOnly: boolean;
+  available: boolean;
+  skipReasons: Array<
+    "no auth" | "not allowlisted" | "plugin removed" | "model missing from catalog" | "unknown provider"
+  >;
+};
+
+export type ModelsHostedProvidersResult = {
+  enabled: boolean;
+  mode: "prefer-hosted" | "hosted-only";
+  configuredOrder: string[];
+  effectiveOrder: string[];
+  appendConfiguredModels: boolean;
+  providers: HostedProviderStatus[];
+};
+
+export type GatewayWizardStepOption = {
+  value: unknown;
+  label: string;
+  hint?: string;
+};
+
+export type GatewayWizardStep = {
+  id: string;
+  type: "note" | "select" | "text" | "confirm" | "multiselect" | "progress" | "action";
+  title?: string;
+  message?: string;
+  options?: GatewayWizardStepOption[];
+  initialValue?: unknown;
+  placeholder?: string;
+  sensitive?: boolean;
+  executor?: "gateway" | "client";
+};
+
+export type GatewayWizardStatus = "running" | "done" | "cancelled" | "error";
+
+export type GatewayWizardNextResult = {
+  done: boolean;
+  step?: GatewayWizardStep;
+  status?: GatewayWizardStatus;
+  error?: string;
+};
+
+export type GatewayWizardStartResult = GatewayWizardNextResult & {
+  sessionId: string;
+};
+
 export type ToolCatalogProfile = {
   id: "minimal" | "coding" | "messaging" | "full";
   label: string;

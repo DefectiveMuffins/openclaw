@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import type { AgentsProps } from "./agents.ts";
 
 async function loadAgentsUtils() {
@@ -319,6 +319,41 @@ function createAgentsProps(overrides: Partial<AgentsProps> = {}): AgentsProps {
     toolsCatalogLoading: false,
     toolsCatalogError: null,
     toolsCatalogResult: null,
+    hostedProvidersLoading: false,
+    hostedProvidersError: null,
+    hostedProvidersResult: {
+      enabled: false,
+      mode: "prefer-hosted",
+      configuredOrder: [],
+      effectiveOrder: ["google-gemini-cli", "google", "qwen-portal"],
+      appendConfiguredModels: true,
+      providers: [
+        {
+          provider: "google-gemini-cli",
+          label: "Google Gemini CLI",
+          modelRef: "google-gemini-cli/gemini-3-pro-preview",
+          authMode: "oauth",
+          riskLabel: "unofficial",
+          docsUrl: "https://docs.openclaw.ai/providers/google-gemini-cli",
+          optInOnly: false,
+          available: false,
+          skipReasons: ["no auth"],
+        },
+        {
+          provider: "google",
+          label: "Google Gemini",
+          modelRef: "google/gemini-3-pro-preview",
+          authMode: "api-key",
+          riskLabel: "official",
+          docsUrl: "https://docs.openclaw.ai/providers/google",
+          optInOnly: false,
+          available: true,
+          skipReasons: [],
+        },
+      ],
+    },
+    hostedProvidersNotice: null,
+    hostedProviderAuthBusy: false,
     skillsFilter: "",
     onRefresh: () => undefined,
     onSelectAgent: () => undefined,
@@ -335,6 +370,12 @@ function createAgentsProps(overrides: Partial<AgentsProps> = {}): AgentsProps {
     onDiscoverLmStudioModels: () => undefined,
     onModelChange: () => undefined,
     onModelFallbacksChange: () => undefined,
+    onHostedRoutingModeChange: () => undefined,
+    onHostedRoutingAppendConfiguredModelsChange: () => undefined,
+    onHostedRoutingProviderToggle: () => undefined,
+    onHostedRoutingProviderMove: () => undefined,
+    onHostedProvidersRefresh: () => undefined,
+    onHostedProviderAuth: () => undefined,
     onChannelsRefresh: () => undefined,
     onCronRefresh: () => undefined,
     onSkillsFilterChange: () => undefined,
@@ -346,6 +387,25 @@ function createAgentsProps(overrides: Partial<AgentsProps> = {}): AgentsProps {
   };
 }
 
+describe("resolveHostedRoutingUiMode", () => {
+  it("defaults to off until explicitly enabled", async () => {
+    const { resolveHostedRoutingUiMode } = await loadAgentsUtils();
+
+    expect(resolveHostedRoutingUiMode(undefined)).toBe("off");
+    expect(resolveHostedRoutingUiMode({ hostedRouting: { mode: "hosted-only" } })).toBe("off");
+  });
+
+  it("maps enabled hosted routing to the configured mode", async () => {
+    const { resolveHostedRoutingUiMode } = await loadAgentsUtils();
+
+    expect(
+      resolveHostedRoutingUiMode({ hostedRouting: { enabled: true, mode: "prefer-hosted" } }),
+    ).toBe("prefer-hosted");
+    expect(
+      resolveHostedRoutingUiMode({ hostedRouting: { enabled: true, mode: "hosted-only" } }),
+    ).toBe("hosted-only");
+  });
+});
 describe("buildModelOptions", () => {
   it("includes live catalog models alongside configured aliases", async () => {
     const { buildModelOptions } = await loadAgentsUtils();
@@ -389,6 +449,18 @@ describe("buildModelOptions", () => {
   });
 });
 describe("renderAgents overview", () => {
+  it("shows the hosted rotation control on the default agent", async () => {
+    const { renderAgents } = await import("./agents.ts");
+    const text = renderTemplateText(renderAgents(createAgentsProps()));
+
+    expect(text).toContain("Hosted Provider Rotation");
+    expect(text).toContain("Hosted provider order");
+    expect(text).toContain("Refresh providers");
+    expect(text).toContain("Google Gemini");
+    expect(text).toContain("Off by default");
+    expect(text).toContain("Off (manual/API/local default)");
+  });
+
   it("renders the staged RAG and delegation summary cards", async () => {
     const { renderAgents } = await import("./agents.ts");
     const text = renderTemplateText(renderAgents(createAgentsProps()));
@@ -412,3 +484,25 @@ describe("renderAgents overview", () => {
     expect(text).toContain("Sync LM Studio");
   });
 });
+
+describe("hosted provider ordering helpers", () => {
+  it("prefers explicit draft order over backend effective order", async () => {
+    const { resolveHostedRoutingProviderOrder } = await loadAgentsUtils();
+
+    expect(
+      resolveHostedRoutingProviderOrder(
+        { hostedRouting: { providerOrder: ["moonshot", "google"] } },
+        {
+          enabled: false,
+          mode: "prefer-hosted",
+          configuredOrder: [],
+          effectiveOrder: ["google", "qwen-portal"],
+          appendConfiguredModels: true,
+          providers: [],
+        },
+      ),
+    ).toEqual(["moonshot", "google"]);
+  });
+});
+
+

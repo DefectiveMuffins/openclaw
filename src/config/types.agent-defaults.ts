@@ -144,6 +144,17 @@ export type AgentModelRoutingConfig = {
   };
 };
 
+export type AgentHostedRoutingConfig = {
+  /** Prefer already-authenticated hosted providers before configured local/default models. */
+  enabled?: boolean;
+  /** Hosted routing behavior when enabled. */
+  mode?: "prefer-hosted" | "hosted-only";
+  /** Hosted provider order (provider ids only, not provider/model refs). */
+  providerOrder?: string[];
+  /** Append configured model.primary/model.fallbacks after hosted candidates. Default: true. */
+  appendConfiguredModels?: boolean;
+};
+
 export type AgentSubagentDelegationConfig = {
   /** Enable structured delegation helpers for spawned subagents (default: false). */
   enabled?: boolean;
@@ -218,6 +229,8 @@ export type AgentDefaultsConfig = {
   memorySearch?: MemorySearchConfig;
   /** Optional stage-aware routing to cheaper models for planner/retrieval/compression/verification passes. */
   modelRouting?: AgentModelRoutingConfig;
+  /** Prefer authenticated hosted providers before the configured text-model chain. */
+  hostedRouting?: AgentHostedRoutingConfig;
   /** Skills prompt shaping options. */
   skills?: {
     /** Prompt verbosity mode for injected <available_skills> blocks (default: "full"). */

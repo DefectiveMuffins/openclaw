@@ -87,17 +87,17 @@ Per-agent override: `agents.list[].tools.byProvider`.
 
 This is applied **after** the base tool profile and **before** allow/deny lists,
 so it can only narrow the tool set.
-Provider keys accept either `provider` (e.g. `google-antigravity`) or
+Provider keys accept either `provider` (e.g. `google-gemini-cli`) or
 `provider/model` (e.g. `openai/gpt-5.2`).
 
-Example (keep global coding profile, but minimal tools for Google Antigravity):
+Example (keep global coding profile, but minimal tools for Gemini CLI):
 
 ```json5
 {
   tools: {
     profile: "coding",
     byProvider: {
-      "google-antigravity": { profile: "minimal" },
+      "google-gemini-cli": { profile: "minimal" },
     },
   },
 }
@@ -126,7 +126,7 @@ Example (agent-specific override for a single provider):
         id: "support",
         tools: {
           byProvider: {
-            "google-antigravity": { allow: ["message", "sessions_list"] },
+            "google-gemini-cli": { allow: ["message", "sessions_list"] },
           },
         },
       },
@@ -207,7 +207,7 @@ Notes:
 - Use `process` to poll/log/write/kill/clear background sessions.
 - If `process` is disallowed, `exec` runs synchronously and ignores `yieldMs`/`background`.
 - `elevated` is gated by `tools.elevated` plus any `agents.list[].tools.elevated` override (both must allow) and is an alias for `host=gateway` + `security=full`.
-- `elevated` only changes behavior when the agent is sandboxed (otherwise it’s a no-op).
+- `elevated` only changes behavior when the agent is sandboxed (otherwise itÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢s a no-op).
 - `host=node` can target a macOS companion app or a headless node host (`openclaw node run`).
 - gateway/node approvals and allowlists: [Exec approvals](/tools/exec-approvals).
 
@@ -261,7 +261,7 @@ Search the web using Brave Search API.
 Core parameters:
 
 - `query` (required)
-- `count` (1–10; default from `tools.web.search.maxResults`)
+- `count` (1ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“10; default from `tools.web.search.maxResults`)
 
 Notes:
 
@@ -272,7 +272,7 @@ Notes:
 
 ### `web_fetch`
 
-Fetch and extract readable content from a URL (HTML → markdown/text).
+Fetch and extract readable content from a URL (HTML ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ markdown/text).
 
 Core parameters:
 
@@ -303,10 +303,10 @@ Core actions:
 
 Profile management:
 
-- `profiles` — list all browser profiles with status
-- `create-profile` — create new profile with auto-allocated port (or `cdpUrl`)
-- `delete-profile` — stop browser, delete user data, remove from config (local only)
-- `reset-profile` — kill orphan process on profile's port (local only)
+- `profiles` ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â list all browser profiles with status
+- `create-profile` ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â create new profile with auto-allocated port (or `cdpUrl`)
+- `delete-profile` ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â stop browser, delete user data, remove from config (local only)
+- `reset-profile` ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â kill orphan process on profile's port (local only)
 
 Common parameters:
 
@@ -324,7 +324,7 @@ Common parameters:
 - `snapshot` defaults to `ai` when Playwright is installed; use `aria` for the accessibility tree.
 - `snapshot` also supports role-snapshot options (`interactive`, `compact`, `depth`, `selector`) which return refs like `e12`.
 - `act` requires `ref` from `snapshot` (numeric `12` from AI snapshots, or `e12` from role snapshots); use `evaluate` for rare CSS selector needs.
-- Avoid `act` → `wait` by default; use it only in exceptional cases (no reliable UI state to wait on).
+- Avoid `act` ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ `wait` by default; use it only in exceptional cases (no reliable UI state to wait on).
 - `upload` can optionally pass a `ref` to auto-click after arming.
 - `upload` also supports `inputRef` (aria ref) or `element` (CSS selector) to set `<input type="file">` directly.
 
@@ -443,7 +443,7 @@ Notes:
 
 - `send` routes WhatsApp via the Gateway; other channels go direct.
 - `poll` uses the Gateway for WhatsApp and MS Teams; Discord polls go direct.
-- When a message tool call is bound to an active chat session, sends are constrained to that session’s target to avoid cross-context leaks.
+- When a message tool call is bound to an active chat session, sends are constrained to that sessionÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢s target to avoid cross-context leaks.
 
 ### `cron`
 
@@ -510,8 +510,8 @@ Notes:
   - Configure limits via `tools.sessions_spawn.attachments` (`enabled`, `maxTotalBytes`, `maxFiles`, `maxFileBytes`, `retainOnSessionKeep`).
   - `attachAs.mountPath` is a reserved hint for future mount implementations.
 - `sessions_spawn` is non-blocking and returns `status: "accepted"` immediately.
-- `sessions_send` runs a reply‑back ping‑pong (reply `REPLY_SKIP` to stop; max turns via `session.agentToAgent.maxPingPongTurns`, 0–5).
-- After the ping‑pong, the target agent runs an **announce step**; reply `ANNOUNCE_SKIP` to suppress the announcement.
+- `sessions_send` runs a replyÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Ëœback pingÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Ëœpong (reply `REPLY_SKIP` to stop; max turns via `session.agentToAgent.maxPingPongTurns`, 0ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“5).
+- After the pingÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Ëœpong, the target agent runs an **announce step**; reply `ANNOUNCE_SKIP` to suppress the announcement.
 - Sandbox clamp: when the current session is sandboxed and `agents.defaults.sandbox.sessionToolsVisibility: "spawned"`, OpenClaw clamps `tools.sessions.visibility` to `tree`.
 
 ### `agents_list`
@@ -544,26 +544,26 @@ Browser tool:
 
 Browser automation:
 
-1. `browser` → `status` / `start`
+1. `browser` ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ `status` / `start`
 2. `snapshot` (ai or aria)
 3. `act` (click/type/press)
 4. `screenshot` if you need visual confirmation
 
 Canvas render:
 
-1. `canvas` → `present`
+1. `canvas` ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ `present`
 2. `a2ui_push` (optional)
 3. `snapshot`
 
 Node targeting:
 
-1. `nodes` → `status`
+1. `nodes` ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ `status`
 2. `describe` on the chosen node
 3. `notify` / `run` / `camera_snap` / `screen_record`
 
 ## Safety
 
-- Avoid direct `system.run`; use `nodes` → `run` only with explicit user consent.
+- Avoid direct `system.run`; use `nodes` ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ `run` only with explicit user consent.
 - Respect user consent for camera/screen capture.
 - Use `status/describe` to ensure permissions before invoking media commands.
 
@@ -574,5 +574,5 @@ Tools are exposed in two parallel channels:
 1. **System prompt text**: a human-readable list + guidance.
 2. **Tool schema**: the structured function definitions sent to the model API.
 
-That means the agent sees both “what tools exist” and “how to call them.” If a tool
-doesn’t appear in the system prompt or the schema, the model cannot call it.
+That means the agent sees both ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œwhat tools existÃƒÂ¢Ã¢â€šÂ¬Ã‚Â and ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œhow to call them.ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â If a tool
+doesnÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢t appear in the system prompt or the schema, the model cannot call it.

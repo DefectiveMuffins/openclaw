@@ -158,5 +158,7 @@ export type OnboardOptions = {
   nodeManager?: NodeManagerChoice;
   remoteUrl?: string;
   remoteToken?: string;
+  preferHosted?: boolean;
+  hostedProviderOrder?: string;
   json?: boolean;
 };

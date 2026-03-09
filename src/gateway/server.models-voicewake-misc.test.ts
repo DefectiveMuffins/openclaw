@@ -1,4 +1,4 @@
-import fs from "node:fs/promises";
+﻿import fs from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import path from "node:path";
@@ -318,6 +318,26 @@ describe("gateway server models + voicewake", () => {
     expect(piSdkMock.discoverCalls).toBe(1);
   });
 
+  test("models.hostedProviders returns hosted provider status for control UI", async () => {
+    await withTempHome(async () => {
+      const res = await rpcReq<{
+        enabled: boolean;
+        mode: string;
+        providers: Array<{
+          provider: string;
+          modelRef: string;
+          available: boolean;
+          skipReasons: string[];
+        }>;
+      }>(ws, "models.hostedProviders", {});
+
+      expect(res.ok).toBe(true);
+      expect(res.payload?.enabled).toBe(false);
+      expect(res.payload?.mode).toBe("prefer-hosted");
+      expect(res.payload?.providers.some((provider) => provider.provider === "google")).toBe(true);
+    });
+  });
+
   test("models.list filters to allowlisted configured models by default", async () => {
     await expectAllowlistedModels({
       primary: "openai/gpt-test-z",
@@ -612,3 +632,4 @@ describe("gateway server misc", () => {
     );
   });
 });
+

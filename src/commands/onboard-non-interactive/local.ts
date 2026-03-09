@@ -1,3 +1,4 @@
+import { applyHostedRoutingOnboardingConfig } from "../../agents/hosted-routing.js";
 import { formatCliCommand } from "../../cli/command-format.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { resolveGatewayPort, writeConfigFile } from "../../config/config.js";
@@ -18,6 +19,14 @@ import { applyNonInteractiveGatewayConfig } from "./local/gateway-config.js";
 import { logNonInteractiveOnboardingJson } from "./local/output.js";
 import { applyNonInteractiveSkillsConfig } from "./local/skills-config.js";
 import { resolveNonInteractiveWorkspaceDir } from "./local/workspace.js";
+
+function parseHostedProviderOrder(raw?: string): string[] | undefined {
+  const values = raw
+    ?.split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return values && values.length > 0 ? values : undefined;
+}
 
 export async function runNonInteractiveOnboardingLocal(params: {
   opts: OnboardOptions;
@@ -61,6 +70,13 @@ export async function runNonInteractiveOnboardingLocal(params: {
       return;
     }
     nextConfig = nextConfigAfterAuth;
+  }
+
+  if (opts.preferHosted) {
+    nextConfig = applyHostedRoutingOnboardingConfig({
+      cfg: nextConfig,
+      providerOrder: parseHostedProviderOrder(opts.hostedProviderOrder),
+    });
   }
 
   const gatewayBasePort = resolveGatewayPort(baseConfig);

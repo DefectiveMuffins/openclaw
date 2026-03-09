@@ -1,0 +1,8 @@
+{
+  "id": "trap-plugin",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

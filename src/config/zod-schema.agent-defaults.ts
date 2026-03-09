@@ -32,6 +32,16 @@ const ModelRoutingSchema = z
   .strict()
   .optional();
 
+const HostedRoutingSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    mode: z.union([z.literal("prefer-hosted"), z.literal("hosted-only")]).optional(),
+    providerOrder: z.array(z.string()).optional(),
+    appendConfiguredModels: z.boolean().optional(),
+  })
+  .strict()
+  .optional();
+
 export const AgentDefaultsSchema = z
   .object({
     model: AgentModelSchema.optional(),
@@ -67,6 +77,7 @@ export const AgentDefaultsSchema = z
     cliBackends: z.record(z.string(), CliBackendSchema).optional(),
     memorySearch: MemorySearchSchema,
     modelRouting: ModelRoutingSchema,
+    hostedRouting: HostedRoutingSchema,
     skills: z
       .object({
         promptMode: z.union([z.literal("full"), z.literal("compact")]).optional(),

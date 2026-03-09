@@ -67,6 +67,7 @@ import {
 } from "../infra/agent-events.js";
 import { buildOutboundSessionContext } from "../infra/outbound/session-context.js";
 import { getRemoteSkillEligibility } from "../infra/skills-remote.js";
+import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 import { defaultRuntime, type RuntimeEnv } from "../runtime.js";
 import { applyVerboseOverride } from "../sessions/level-overrides.js";
@@ -166,6 +167,7 @@ function runAgentAttempt(params: {
   messageChannel: ReturnType<typeof resolveMessageChannel>;
   skillsSnapshot: ReturnType<typeof buildWorkspaceSkillSnapshot> | undefined;
   resolvedVerboseLevel: VerboseLevel | undefined;
+  fallbackContext: { total: number };
   agentDir: string;
   onAgentEvent: (evt: { stream: string; data?: Record<string, unknown> }) => void;
   primaryProvider: string;
@@ -302,6 +304,7 @@ function runAgentAttempt(params: {
     clientTools: params.opts.clientTools,
     provider: params.providerOverride,
     model: params.modelOverride,
+    modelFallbackEnabled: params.fallbackContext.total > 1,
     authProfileId,
     authProfileIdSource: authProfileId ? params.sessionEntry?.authProfileOverrideSource : undefined,
     thinkLevel: params.resolvedThinkLevel,
@@ -796,6 +799,11 @@ export async function agentCommand(
     let fallbackModel = model;
     try {
       const runContext = resolveAgentRunContext(opts);
+      const hookRunner = getGlobalHookRunner();
+      const hostedRoutingEligible =
+        !hasStoredOverride &&
+        !hookRunner?.hasHooks("before_model_resolve") &&
+        !hookRunner?.hasHooks("before_agent_start");
       const messageChannel = resolveMessageChannel(
         runContext.messageChannel,
         opts.replyChannel ?? opts.channel,
@@ -817,8 +825,9 @@ export async function agentCommand(
         provider,
         model,
         agentDir,
+        hostedRoutingEligible,
         fallbacksOverride: effectiveFallbacksOverride,
-        run: (providerOverride, modelOverride) => {
+        run: (providerOverride, modelOverride, fallbackContext = { attempt: 1, total: 1 }) => {
           const isFallbackRetry = fallbackAttemptIndex > 0;
           fallbackAttemptIndex += 1;
           return runAgentAttempt({
@@ -842,6 +851,7 @@ export async function agentCommand(
             messageChannel,
             skillsSnapshot,
             resolvedVerboseLevel,
+            fallbackContext,
             agentDir,
             primaryProvider: provider,
             sessionStore,

@@ -1,4 +1,4 @@
-@import "./chat.css";
+﻿@import "./chat.css";
 
 /* ===========================================
    Update Banner
@@ -2206,6 +2206,133 @@
   gap: 8px;
 }
 
+.hosted-provider-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hosted-provider-list {
+  display: grid;
+  gap: 12px;
+}
+
+.hosted-provider-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+
+.hosted-provider-row.active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.hosted-provider-main {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.hosted-provider-main input {
+  margin-top: 4px;
+}
+
+.hosted-provider-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.hosted-provider-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.hosted-provider-title {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.hosted-provider-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: flex-start;
+}
+
+.hosted-provider-checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.hosted-auth-dialog {
+  width: min(620px, 100%);
+}
+
+.hosted-auth-message {
+  margin-top: 12px;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.hosted-auth-form {
+  margin-top: 12px;
+}
+
+.hosted-auth-form input,
+.hosted-auth-form select {
+  width: 100%;
+}
+
+.hosted-auth-multiselect {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.hosted-auth-action-row {
+  margin-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.hosted-auth-url {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--secondary);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 720px) {
+  .hosted-provider-summary {
+    flex-direction: column;
+  }
+
+  .hosted-provider-row {
+    grid-template-columns: 1fr;
+  }
+
+  .hosted-provider-actions {
+    justify-content: flex-start;
+  }
+}
+
 /* ===========================================
    Agents
    =========================================== */
@@ -2553,7 +2680,7 @@
 }
 
 .agent-skills-header::after {
-  content: "▸";
+  content: "â–¸";
   font-size: 12px;
   color: var(--muted);
   transition: transform var(--duration-fast) ease;
@@ -2891,3 +3018,5 @@
     flex: 1 1 auto;
   }
 }
+
+

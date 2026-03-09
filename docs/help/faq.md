@@ -146,7 +146,7 @@ Quick answers plus deeper troubleshooting for real-world setups (local dev, VPS,
   - [What do OpenClaw, Flawd, and Krill use for models?](#what-do-openclaw-flawd-and-krill-use-for-models)
   - [How do I switch models on the fly (without restarting)?](#how-do-i-switch-models-on-the-fly-without-restarting)
   - [Can I use GPT 5.2 for daily tasks and Codex 5.3 for coding](#can-i-use-gpt-52-for-daily-tasks-and-codex-53-for-coding)
-  - [Why do I see "Model … is not allowed" and then no reply?](#why-do-i-see-model-is-not-allowed-and-then-no-reply)
+  - [Why do I see "Model â€¦ is not allowed" and then no reply?](#why-do-i-see-model-is-not-allowed-and-then-no-reply)
   - [Why do I see "Unknown model: minimax/MiniMax-M2.1"?](#why-do-i-see-unknown-model-minimaxminimaxm21)
   - [Can I use MiniMax as my default and OpenAI for complex tasks?](#can-i-use-minimax-as-my-default-and-openai-for-complex-tasks)
   - [Are opus / sonnet / gpt built-in shortcuts?](#are-opus-sonnet-gpt-builtin-shortcuts)
@@ -804,7 +804,7 @@ any Mac works. **Use [BlueBubbles](/channels/bluebubbles)** (recommended) for iM
 Common setups:
 
 - Run the Gateway on Linux/VPS, and run the BlueBubbles server on any Mac signed into Messages.
-- Run everything on the Mac if you want the simplest single‑machine setup.
+- Run everything on the Mac if you want the simplest singleâ€‘machine setup.
 
 Docs: [BlueBubbles](/channels/bluebubbles), [Nodes](/nodes),
 [Mac remote mode](/platforms/mac/remote).
@@ -888,7 +888,7 @@ Yes. Install the other flavor, then run Doctor so the gateway service points at 
 This **does not delete your data** - it only changes the OpenClaw code install. Your state
 (`~/.openclaw`) and workspace (`~/.openclaw/workspace`) stay untouched.
 
-From npm → git:
+From npm â†’ git:
 
 ```bash
 git clone https://github.com/openclaw/openclaw.git
@@ -899,7 +899,7 @@ openclaw doctor
 openclaw gateway restart
 ```
 
-From git → npm:
+From git â†’ npm:
 
 ```bash
 npm install -g openclaw@latest
@@ -1052,7 +1052,7 @@ Use managed overrides instead of editing the repo copy. Put your changes in `~/.
 
 ### Can I load skills from a custom folder
 
-Yes. Add extra directories via `skills.load.extraDirs` in `~/.openclaw/openclaw.json` (lowest precedence). Default precedence remains: `<workspace>/skills` → `~/.openclaw/skills` → bundled → `skills.load.extraDirs`. `clawhub` installs into `./skills` by default, which OpenClaw treats as `<workspace>/skills`.
+Yes. Add extra directories via `skills.load.extraDirs` in `~/.openclaw/openclaw.json` (lowest precedence). Default precedence remains: `<workspace>/skills` â†’ `~/.openclaw/skills` â†’ bundled â†’ `skills.load.extraDirs`. `clawhub` installs into `./skills` by default, which OpenClaw treats as `<workspace>/skills`.
 
 ### How can I use different models for different tasks
 
@@ -1214,7 +1214,7 @@ openclaw browser extension install
 openclaw browser extension path
 ```
 
-Then Chrome → `chrome://extensions` → enable "Developer mode" → "Load unpacked" → pick that folder.
+Then Chrome â†’ `chrome://extensions` â†’ enable "Developer mode" â†’ "Load unpacked" â†’ pick that folder.
 
 Full guide (including remote Gateway + security notes): [Chrome extension](/tools/chrome-extension)
 
@@ -1537,7 +1537,7 @@ See the full config examples in [Browser](/tools/browser#use-brave-or-another-ch
 Telegram messages are handled by the **gateway**. The gateway runs the agent and
 only then calls nodes over the **Gateway WebSocket** when a node tool is needed:
 
-Telegram → Gateway → Agent → `node.*` → Node → Gateway → Telegram
+Telegram â†’ Gateway â†’ Agent â†’ `node.*` â†’ Node â†’ Gateway â†’ Telegram
 
 Nodes don't see inbound provider traffic; they only receive node RPC calls.
 
@@ -2208,12 +2208,12 @@ Docs: [Models](/concepts/models), [Multi-Agent Routing](/concepts/multi-agent), 
 
 Yes. OpenClaw ships a few default shorthands (only applied when the model exists in `agents.defaults.models`):
 
-- `opus` → `anthropic/claude-opus-4-6`
-- `sonnet` → `anthropic/claude-sonnet-4-5`
-- `gpt` → `openai/gpt-5.2`
-- `gpt-mini` → `openai/gpt-5-mini`
-- `gemini` → `google/gemini-3-pro-preview`
-- `gemini-flash` → `google/gemini-3-flash-preview`
+- `opus` â†’ `anthropic/claude-opus-4-6`
+- `sonnet` â†’ `anthropic/claude-sonnet-4-5`
+- `gpt` â†’ `openai/gpt-5.2`
+- `gpt-mini` â†’ `openai/gpt-5-mini`
+- `gemini` â†’ `google/gemini-3-pro-preview`
+- `gemini-flash` â†’ `google/gemini-3-flash-preview`
 
 If you set your own alias with the same name, your value wins.
 
@@ -2341,13 +2341,6 @@ can't find it in its auth store.
 If your model config includes Google Gemini as a fallback (or you switched to a Gemini shorthand), OpenClaw will try it during model fallback. If you haven't configured Google credentials, you'll see `No API key found for provider "google"`.
 
 Fix: either provide Google auth, or remove/avoid Google models in `agents.defaults.model.fallbacks` / aliases so fallback doesn't route there.
-
-**LLM request rejected message thinking signature required google antigravity**
-
-Cause: the session history contains **thinking blocks without signatures** (often from
-an aborted/partial stream). Google Antigravity requires signatures for thinking blocks.
-
-Fix: OpenClaw now strips unsigned thinking blocks for Google Antigravity Claude. If it still appears, start a **new session** or set `/thinking off` for that agent.
 
 ## Auth profiles: what they are and how to manage them
 
@@ -2509,7 +2502,7 @@ Yes, but you must isolate:
 
 Quick setup (recommended):
 
-- Use `openclaw --profile <name> …` per instance (auto-creates `~/.openclaw-<name>`).
+- Use `openclaw --profile <name> â€¦` per instance (auto-creates `~/.openclaw-<name>`).
 - Set a unique `gateway.port` in each profile config (or pass `--port` for manual runs).
 - Install a per-profile service: `openclaw --profile <name> gateway install`.
 

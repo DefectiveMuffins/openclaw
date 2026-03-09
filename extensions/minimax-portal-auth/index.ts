@@ -49,7 +49,7 @@ function createOAuthHandler(region: MiniMaxRegion) {
     try {
       const result = await loginMiniMaxPortalOAuth({
         openUrl: ctx.openUrl,
-        note: ctx.prompter.note,
+        note: async (message, title) => await ctx.prompter.note(message, title),
         progress,
         region,
       });
