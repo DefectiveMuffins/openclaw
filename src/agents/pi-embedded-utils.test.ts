@@ -472,6 +472,45 @@ File contents here`,
       expect(extractAssistantText(msg), testCase.name).toBe(testCase.expected);
     }
   });
+
+  it("falls back to provider reasoning_content when no text blocks are present", () => {
+    const msg = makeAssistantMessage({
+      role: "assistant",
+      content: [
+        {
+          type: "thinking",
+          thinking: "Final answer from provider-specific reasoning field.",
+          thinkingSignature: "reasoning_content",
+        },
+      ],
+      timestamp: Date.now(),
+    });
+
+    expect(extractAssistantText(msg)).toBe("Final answer from provider-specific reasoning field.");
+  });
+
+  it("does not surface provider reasoning_content when the assistant is still in tool use", () => {
+    const msg = makeAssistantMessage({
+      role: "assistant",
+      stopReason: "toolUse",
+      content: [
+        {
+          type: "thinking",
+          thinking: "Let me search a few more things first.",
+          thinkingSignature: "reasoning_content",
+        },
+        {
+          type: "toolCall",
+          id: "toolu_01",
+          name: "web_search",
+          arguments: { query: "openclaw" },
+        },
+      ],
+      timestamp: Date.now(),
+    });
+
+    expect(extractAssistantText(msg)).toBe("");
+  });
 });
 
 describe("formatReasoningMessage", () => {

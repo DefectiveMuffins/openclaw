@@ -14,9 +14,17 @@ import {
 } from "../routing/session-key.js";
 import { normalizeDeliveryContext } from "../utils/delivery-context.js";
 import { resolveAgentConfig, resolveAgentWorkspaceDir } from "./agent-scope.js";
-import { resolveTopLevelDelegationPolicy } from "./delegation-enforcement.js";
+import {
+  resolveTopLevelDelegationPolicy,
+  validateDelegatedCorrectiveSpawn,
+} from "./delegation-enforcement.js";
 import { AGENT_LANE_SUBAGENT } from "./lanes.js";
-import { resolveSubagentSpawnModelSelection } from "./model-selection.js";
+import { loadModelCatalog } from "./model-catalog.js";
+import {
+  resolveAllowedModelRef,
+  resolveDefaultModelForAgent,
+  resolveSubagentSpawnModelSelection,
+} from "./model-selection.js";
 import { resolveSandboxRuntimeStatus } from "./sandbox/runtime-status.js";
 import { buildSubagentSystemPrompt } from "./subagent-announce.js";
 import { getSubagentDepthFromSessionStore } from "./subagent-depth.js";
@@ -107,6 +115,7 @@ export type SpawnSubagentResult = {
   runId?: string;
   mode?: SpawnSubagentMode;
   note?: string;
+  model?: string;
   modelApplied?: boolean;
   delegation?: {
     role?: SubagentDelegationRole;
@@ -437,13 +446,75 @@ export async function spawnSubagentDirect(
     runTimeoutSeconds =
       runTimeoutSeconds > 0 ? Math.min(runTimeoutSeconds, roleTimeoutSeconds) : roleTimeoutSeconds;
   }
-  const resolvedModel = resolveSubagentSpawnModelSelection({
+  let resolvedModel = resolveSubagentSpawnModelSelection({
     cfg,
     agentId: targetAgentId,
     modelOverride,
     taskDescription: task,
     role,
   });
+
+  if (topLevelHardDelegation) {
+    const explicitModel = typeof modelOverride === "string" ? modelOverride.trim() : "";
+    if (!explicitModel) {
+      return {
+        status: "error",
+        error:
+          "Hard delegation manager mode requires sessions_spawn.model. Call models_list, choose a model, then spawn.",
+      };
+    }
+
+    const catalog = await loadModelCatalog({ config: cfg });
+    const targetDefaultModel = resolveDefaultModelForAgent({
+      cfg,
+      agentId: targetAgentId,
+    });
+    const targetDefaultRef = `${targetDefaultModel.provider}/${targetDefaultModel.model}`;
+
+    const resolvedExplicitModel = resolveAllowedModelRef({
+      cfg,
+      catalog,
+      raw: explicitModel,
+      defaultProvider: targetDefaultModel.provider,
+      defaultModel: targetDefaultRef,
+    });
+    if ("error" in resolvedExplicitModel) {
+      return {
+        status: "error",
+        error: `sessions_spawn.model ${resolvedExplicitModel.error}`,
+      };
+    }
+
+    const canonicalModel = `${resolvedExplicitModel.ref.provider}/${resolvedExplicitModel.ref.model}`;
+    const discoveredCatalogKeys = new Set(
+      catalog.map((entry) => `${entry.provider}/${entry.id}`.toLowerCase()),
+    );
+    if (!discoveredCatalogKeys.has(canonicalModel.toLowerCase())) {
+      return {
+        status: "error",
+        error:
+          `sessions_spawn.model is not available in the runtime model catalog: ${canonicalModel}. ` +
+          "Use models_list to choose an allowed discovered model.",
+      };
+    }
+
+    const correctiveValidation = validateDelegatedCorrectiveSpawn(
+      {
+        sessionKey: requesterInternalKey,
+      },
+      {
+        model: canonicalModel,
+      },
+    );
+    if (!correctiveValidation.ok) {
+      return {
+        status: "error",
+        error: correctiveValidation.error,
+      };
+    }
+
+    resolvedModel = canonicalModel;
+  }
 
   const resolvedThinkingDefaultRaw =
     readStringParam(targetAgentConfig?.subagents ?? {}, "thinking") ??
@@ -947,6 +1018,7 @@ export async function spawnSubagentDirect(
     runId: childRunId,
     mode: spawnMode,
     note,
+    model: resolvedModel,
     modelApplied: resolvedModel ? modelApplied : undefined,
     delegation:
       role || responseFormat !== "text" || readOnly

@@ -8,6 +8,9 @@ import {
   isBundledSkillAllowed,
   isConfigPathTruthy,
   loadWorkspaceSkillEntries,
+  type SkillAuditStatus,
+  type SkillAuditSummary,
+  type SkillTrustReason,
   resolveBundledAllowlist,
   resolveSkillConfig,
   resolveSkillsInstallPreferences,
@@ -41,6 +44,11 @@ export type SkillStatusEntry = {
   always: boolean;
   disabled: boolean;
   blockedByAllowlist: boolean;
+  quarantined: boolean;
+  auditStatus: SkillAuditStatus;
+  auditSummary?: SkillAuditSummary;
+  lastScannedAt?: number;
+  trustReason: SkillTrustReason;
   eligible: boolean;
   requirements: Requirements;
   missing: Requirements;
@@ -190,6 +198,28 @@ function buildSkillStatus(
     bundledNames && bundledNames.size > 0
       ? bundledNames.has(entry.skill.name)
       : entry.skill.source === "openclaw-bundled";
+  const audit =
+    entry.audit ??
+    (bundled
+      ? {
+          approved: true,
+          quarantined: false,
+          auditStatus: "not_applicable" as const,
+          trustReason: "bundled" as const,
+        }
+      : entry.skill.source === "openclaw-plugin"
+        ? {
+            approved: true,
+            quarantined: false,
+            auditStatus: "not_applicable" as const,
+            trustReason: "plugin_owned" as const,
+          }
+        : {
+            approved: false,
+            quarantined: false,
+            auditStatus: "pending" as const,
+            trustReason: "unreviewed" as const,
+          });
 
   const { emoji, homepage, required, missing, requirementsSatisfied, configChecks } =
     evaluateEntryRequirementsForCurrentPlatform({
@@ -200,7 +230,7 @@ function buildSkillStatus(
       isEnvSatisfied,
       isConfigSatisfied,
     });
-  const eligible = !disabled && !blockedByAllowlist && requirementsSatisfied;
+  const eligible = !disabled && !blockedByAllowlist && !audit.quarantined && requirementsSatisfied;
 
   return {
     name: entry.skill.name,
@@ -216,6 +246,11 @@ function buildSkillStatus(
     always,
     disabled,
     blockedByAllowlist,
+    quarantined: audit.quarantined,
+    auditStatus: audit.auditStatus,
+    auditSummary: audit.auditSummary,
+    lastScannedAt: audit.lastScannedAt,
+    trustReason: audit.trustReason,
     eligible,
     requirements: required,
     missing,

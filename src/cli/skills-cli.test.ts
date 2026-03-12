@@ -3,7 +3,6 @@ import type { SkillStatusEntry, SkillStatusReport } from "../agents/skills-statu
 import { createEmptyInstallChecks } from "./requirements-test-fixtures.js";
 import { formatSkillInfo, formatSkillsCheck, formatSkillsList } from "./skills-cli.format.js";
 
-// Unit tests: don't pay the runtime cost of loading/parsing the real skills loader.
 vi.mock("@mariozechner/pi-coding-agent", () => ({
   loadSkillsFromDir: () => ({ skills: [] }),
   formatSkillsForPrompt: () => "",
@@ -18,11 +17,16 @@ function createMockSkill(overrides: Partial<SkillStatusEntry> = {}): SkillStatus
     filePath: "/path/to/SKILL.md",
     baseDir: "/path/to",
     skillKey: "test-skill",
-    emoji: "🧪",
+    emoji: "test",
     homepage: "https://example.com",
     always: false,
     disabled: false,
     blockedByAllowlist: false,
+    quarantined: false,
+    auditStatus: "not_applicable",
+    auditSummary: undefined,
+    lastScannedAt: undefined,
+    trustReason: "bundled",
     eligible: true,
     ...createEmptyInstallChecks(),
     ...overrides,
@@ -40,8 +44,7 @@ function createMockReport(skills: SkillStatusEntry[]): SkillStatusReport {
 describe("skills-cli", () => {
   describe("formatSkillsList", () => {
     it("formats empty skills list", () => {
-      const report = createMockReport([]);
-      const output = formatSkillsList(report, {});
+      const output = formatSkillsList(createMockReport([]), {});
       expect(output).toContain("No skills found");
       expect(output).toContain("npx clawhub");
     });
@@ -51,14 +54,14 @@ describe("skills-cli", () => {
         createMockSkill({
           name: "peekaboo",
           description: "Capture UI screenshots",
-          emoji: "📸",
+          emoji: "camera",
           eligible: true,
         }),
       ]);
       const output = formatSkillsList(report, {});
       expect(output).toContain("peekaboo");
-      expect(output).toContain("📸");
-      expect(output).toContain("✓");
+      expect(output).toContain("camera");
+      expect(output).toContain("ready");
     });
 
     it("formats skills list with disabled skill", () => {
@@ -112,8 +115,7 @@ describe("skills-cli", () => {
 
   describe("formatSkillInfo", () => {
     it("returns not found message for unknown skill", () => {
-      const report = createMockReport([]);
-      const output = formatSkillInfo(report, "unknown-skill", {});
+      const output = formatSkillInfo(createMockReport([]), "unknown-skill", {});
       expect(output).toContain("not found");
       expect(output).toContain("npx clawhub");
     });
@@ -138,6 +140,24 @@ describe("skills-cli", () => {
             config: [],
             os: [],
           },
+          quarantined: true,
+          auditStatus: "warn",
+          trustReason: "new",
+          auditSummary: {
+            scannedFiles: 2,
+            critical: 0,
+            warn: 1,
+            info: 0,
+            findingsPreview: [
+              {
+                ruleId: "shell-download-and-run",
+                severity: "warn",
+                file: "SKILL.md",
+                line: 3,
+                message: "Download-and-run shell pattern detected",
+              },
+            ],
+          },
         }),
       ]);
       const output = formatSkillInfo(report, "detailed-skill", {});
@@ -147,6 +167,7 @@ describe("skills-cli", () => {
       expect(output).toContain("node");
       expect(output).toContain("Any binaries");
       expect(output).toContain("API_KEY");
+      expect(output).toContain("Quarantined");
     });
   });
 
@@ -160,14 +181,21 @@ describe("skills-cli", () => {
           eligible: false,
           missing: { bins: ["go"], anyBins: [], env: [], config: [], os: [] },
         }),
+        createMockSkill({
+          name: "review-me",
+          eligible: false,
+          quarantined: true,
+          auditStatus: "warn",
+          trustReason: "new",
+        }),
         createMockSkill({ name: "disabled", eligible: false, disabled: true }),
       ]);
       const output = formatSkillsCheck(report, {});
-      expect(output).toContain("2"); // eligible count
       expect(output).toContain("ready-1");
       expect(output).toContain("ready-2");
       expect(output).toContain("not-ready");
-      expect(output).toContain("go"); // missing binary
+      expect(output).toContain("review-me");
+      expect(output).toContain("go");
       expect(output).toContain("npx clawhub");
     });
   });
@@ -212,8 +240,7 @@ describe("skills-cli", () => {
         },
       },
     ])("outputs JSON with --json flag for $formatter", ({ output, assert }) => {
-      const parsed = JSON.parse(output) as Record<string, unknown>;
-      assert(parsed);
+      assert(JSON.parse(output) as Record<string, unknown>);
     });
   });
 });

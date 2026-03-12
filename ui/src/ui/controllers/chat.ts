@@ -32,11 +32,36 @@ export type SendChatMessageOptions = {
   replaceHistory?: boolean;
 };
 
+// Multiple refresh/reconnect paths can request chat.history at once.
+// Only let the newest same-session response update the visible transcript.
+const chatHistoryRequestVersions = new WeakMap<ChatState, number>();
+const chatMessageVersions = new WeakMap<ChatState, number>();
+
+function beginChatHistoryRequest(state: ChatState): number {
+  const nextVersion = (chatHistoryRequestVersions.get(state) ?? 0) + 1;
+  chatHistoryRequestVersions.set(state, nextVersion);
+  return nextVersion;
+}
+
+function isLatestChatHistoryRequest(state: ChatState, version: number): boolean {
+  return (chatHistoryRequestVersions.get(state) ?? 0) === version;
+}
+
+function currentChatMessageVersion(state: ChatState): number {
+  return chatMessageVersions.get(state) ?? 0;
+}
+
+function bumpChatMessageVersion(state: ChatState): void {
+  chatMessageVersions.set(state, currentChatMessageVersion(state) + 1);
+}
+
 export async function loadChatHistory(state: ChatState) {
   if (!state.client || !state.connected) {
     return;
   }
   const requestedSessionKey = state.sessionKey;
+  const requestVersion = beginChatHistoryRequest(state);
+  const requestedMessageVersion = currentChatMessageVersion(state);
   state.chatLoading = true;
   state.lastError = null;
   try {
@@ -47,17 +72,26 @@ export async function loadChatHistory(state: ChatState) {
         limit: 200,
       },
     );
-    if (state.sessionKey !== requestedSessionKey) {
+    if (
+      state.sessionKey !== requestedSessionKey ||
+      currentChatMessageVersion(state) !== requestedMessageVersion ||
+      !isLatestChatHistoryRequest(state, requestVersion)
+    ) {
       return;
     }
     state.chatMessages = Array.isArray(res.messages) ? res.messages : [];
+    bumpChatMessageVersion(state);
     state.chatThinkingLevel = res.thinkingLevel ?? null;
   } catch (err) {
-    if (state.sessionKey === requestedSessionKey) {
+    if (
+      state.sessionKey === requestedSessionKey &&
+      currentChatMessageVersion(state) === requestedMessageVersion &&
+      isLatestChatHistoryRequest(state, requestVersion)
+    ) {
       state.lastError = String(err);
     }
   } finally {
-    if (state.sessionKey === requestedSessionKey) {
+    if (state.sessionKey === requestedSessionKey && isLatestChatHistoryRequest(state, requestVersion)) {
       state.chatLoading = false;
     }
   }
@@ -156,6 +190,7 @@ export async function sendChatMessage(
 
   if (options?.replaceHistory) {
     state.chatMessages = [];
+    bumpChatMessageVersion(state);
   }
   if (contentBlocks.length > 0) {
     state.chatMessages = [
@@ -166,6 +201,7 @@ export async function sendChatMessage(
         timestamp: now,
       },
     ];
+    bumpChatMessageVersion(state);
   }
 
   state.chatSending = true;
@@ -215,6 +251,7 @@ export async function sendChatMessage(
         timestamp: Date.now(),
       },
     ];
+    bumpChatMessageVersion(state);
     return null;
   } finally {
     state.chatSending = false;
@@ -253,6 +290,7 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
       const finalMessage = normalizeFinalAssistantMessage(payload.message);
       if (finalMessage) {
         state.chatMessages = [...state.chatMessages, finalMessage];
+        bumpChatMessageVersion(state);
         return null;
       }
       return "final";
@@ -272,6 +310,7 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
     const finalMessage = normalizeFinalAssistantMessage(payload.message);
     if (finalMessage) {
       state.chatMessages = [...state.chatMessages, finalMessage];
+      bumpChatMessageVersion(state);
     } else if (state.chatStream?.trim()) {
       state.chatMessages = [
         ...state.chatMessages,
@@ -281,6 +320,7 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
           timestamp: Date.now(),
         },
       ];
+      bumpChatMessageVersion(state);
     }
     state.chatStream = null;
     state.chatRunId = null;
@@ -289,6 +329,7 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
     const normalizedMessage = normalizeAbortedAssistantMessage(payload.message);
     if (normalizedMessage) {
       state.chatMessages = [...state.chatMessages, normalizedMessage];
+      bumpChatMessageVersion(state);
     } else {
       const streamedText = state.chatStream ?? "";
       if (streamedText.trim()) {
@@ -300,6 +341,7 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
             timestamp: Date.now(),
           },
         ];
+        bumpChatMessageVersion(state);
       }
     }
     state.chatStream = null;

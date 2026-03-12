@@ -80,6 +80,9 @@ export function shouldIncludeSkill(params: {
   if (skillConfig?.enabled === false) {
     return false;
   }
+  if (entry.audit?.quarantined === true) {
+    return false;
+  }
   if (!isBundledSkillAllowed(entry, allowBundled)) {
     return false;
   }

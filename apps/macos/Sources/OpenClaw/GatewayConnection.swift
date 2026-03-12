@@ -79,7 +79,9 @@ actor GatewayConnection {
         case chatSend = "chat.send"
         case chatAbort = "chat.abort"
         case skillsStatus = "skills.status"
+        case skillsAudit = "skills.audit"
         case skillsInstall = "skills.install"
+        case skillsTrust = "skills.trust"
         case skillsUpdate = "skills.update"
         case voicewakeGet = "voicewake.get"
         case voicewakeSet = "voicewake.set"
@@ -515,6 +517,13 @@ extension GatewayConnection {
 
     func skillsStatus() async throws -> SkillsStatusReport {
         try await self.requestDecoded(method: .skillsStatus)
+    }
+
+    func skillsTrust(skillKey: String, action: String) async throws -> SkillTrustResult {
+        try await self.requestDecoded(method: .skillsTrust, params: [
+            "skillKey": AnyCodable(skillKey),
+            "action": AnyCodable(action),
+        ])
     }
 
     func skillsInstall(

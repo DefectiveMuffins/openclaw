@@ -7,6 +7,9 @@ import {
   type ChatState,
 } from "./chat.ts";
 
+type HistoryResponse = { messages: unknown[]; thinkingLevel: string };
+type HistoryResolver = (value: HistoryResponse) => void;
+
 function createState(overrides: Partial<ChatState> = {}): ChatState {
   return {
     chatAttachments: [],
@@ -28,11 +31,10 @@ function createState(overrides: Partial<ChatState> = {}): ChatState {
 
 describe("loadChatHistory", () => {
   it("ignores stale responses after the session changes", async () => {
-    let resolveRequest: ((value: { messages: unknown[]; thinkingLevel: string }) => void) | null =
-      null;
+    let resolveRequest: HistoryResolver | null = null;
     const request = vi.fn().mockImplementation(
       () =>
-        new Promise<{ messages: unknown[]; thinkingLevel: string }>((resolve) => {
+        new Promise<HistoryResponse>((resolve) => {
           resolveRequest = resolve;
         }),
     );
@@ -48,7 +50,7 @@ describe("loadChatHistory", () => {
     if (!resolveRequest) {
       throw new Error("expected loadChatHistory request");
     }
-    (resolveRequest as (value: { messages: unknown[]; thinkingLevel: string }) => void)({
+    (resolveRequest as HistoryResolver)({
       messages: [{ role: "assistant", content: [{ type: "text", text: "stale" }], timestamp: 2 }],
       thinkingLevel: "low",
     });
@@ -58,6 +60,111 @@ describe("loadChatHistory", () => {
       { role: "assistant", content: [{ type: "text", text: "keep" }], timestamp: 1 },
     ]);
     expect(state.chatThinkingLevel).toBeNull();
+  });
+
+  it("ignores older same-session responses when a newer history load wins", async () => {
+    let resolveFirst: HistoryResolver | null = null;
+    let resolveSecond: HistoryResolver | null = null;
+    const request = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<HistoryResponse>((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<HistoryResponse>((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
+    const state = createState({
+      client: { request } as unknown as ChatState["client"],
+    });
+
+    const first = loadChatHistory(state);
+    const second = loadChatHistory(state);
+
+    const firstResolver = resolveFirst as HistoryResolver | null;
+    const secondResolver = resolveSecond as HistoryResolver | null;
+    if (!firstResolver || !secondResolver) {
+      throw new Error("expected both loadChatHistory requests");
+    }
+
+    secondResolver({
+      messages: [{ role: "assistant", content: [{ type: "text", text: "new" }], timestamp: 2 }],
+      thinkingLevel: "high",
+    });
+    await second;
+
+    expect(state.chatMessages).toEqual([
+      { role: "assistant", content: [{ type: "text", text: "new" }], timestamp: 2 },
+    ]);
+    expect(state.chatThinkingLevel).toBe("high");
+    expect(state.chatLoading).toBe(false);
+
+    firstResolver({
+      messages: [{ role: "assistant", content: [{ type: "text", text: "old" }], timestamp: 1 }],
+      thinkingLevel: "low",
+    });
+    await first;
+
+    expect(state.chatMessages).toEqual([
+      { role: "assistant", content: [{ type: "text", text: "new" }], timestamp: 2 },
+    ]);
+    expect(state.chatThinkingLevel).toBe("high");
+    expect(state.chatLoading).toBe(false);
+  });
+
+  it("ignores an in-flight history response after a live final updates chat state", async () => {
+    let resolveRequest: HistoryResolver | null = null;
+    const request = vi.fn().mockImplementation(
+      () =>
+        new Promise<HistoryResponse>((resolve) => {
+          resolveRequest = resolve;
+        }),
+    );
+    const state = createState({
+      client: { request } as unknown as ChatState["client"],
+      chatMessages: [{ role: "user", content: [{ type: "text", text: "hi" }], timestamp: 1 }],
+      chatRunId: "run-1",
+      chatStream: "live reply",
+      chatStreamStartedAt: 10,
+    });
+
+    const pending = loadChatHistory(state);
+    handleChatEvent(state, {
+      runId: "run-1",
+      sessionKey: "main",
+      state: "final",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "live reply" }],
+        timestamp: 2,
+      },
+    });
+
+    const resolver = resolveRequest as HistoryResolver | null;
+    if (!resolver) {
+      throw new Error("expected loadChatHistory request");
+    }
+    resolver({
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }], timestamp: 1 }],
+      thinkingLevel: "low",
+    });
+    await pending;
+
+    expect(state.chatMessages).toEqual([
+      { role: "user", content: [{ type: "text", text: "hi" }], timestamp: 1 },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "live reply" }],
+        timestamp: 2,
+      },
+    ]);
+    expect(state.chatThinkingLevel).toBeNull();
+    expect(state.chatLoading).toBe(false);
   });
 });
 describe("sendChatMessage", () => {

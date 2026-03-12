@@ -192,6 +192,45 @@ describe("buildEmbeddedRunPayloads", () => {
     expect(payloads).toHaveLength(0);
   });
 
+  it("uses provider reasoning_content as the final answer when no text was emitted", () => {
+    const payloads = buildPayloads({
+      lastAssistant: makeAssistant({
+        stopReason: "stop",
+        errorMessage: undefined,
+        content: [
+          {
+            type: "thinking",
+            thinking: "Final answer recovered from provider reasoning field.",
+            thinkingSignature: "reasoning_content",
+          },
+        ],
+      }),
+    });
+
+    expectSinglePayloadText(payloads, "Final answer recovered from provider reasoning field.");
+  });
+
+  it("does not emit duplicate reasoning blocks when recovered answer comes from reasoning_content", () => {
+    const payloads = buildPayloads({
+      reasoningLevel: "on",
+      lastAssistant: makeAssistant({
+        stopReason: "stop",
+        errorMessage: undefined,
+        content: [
+          {
+            type: "thinking",
+            thinking: "Final answer recovered from provider reasoning field.",
+            thinkingSignature: "reasoning_content",
+          },
+        ],
+      }),
+    });
+
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]?.text).toBe("Final answer recovered from provider reasoning field.");
+    expect(payloads[0]?.isReasoning).not.toBe(true);
+  });
+
   it("adds tool error fallback when the assistant only invoked tools and verbose mode is on", () => {
     const payloads = buildPayloads({
       lastAssistant: makeAssistant({

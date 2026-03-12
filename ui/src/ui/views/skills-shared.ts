@@ -15,6 +15,9 @@ export function computeSkillReasons(skill: SkillStatusEntry): string[] {
   if (skill.disabled) {
     reasons.push("disabled");
   }
+  if (skill.quarantined) {
+    reasons.push(`quarantined (${skill.trustReason.replaceAll("_", " ")})`);
+  }
   if (skill.blockedByAllowlist) {
     reasons.push("blocked by allowlist");
   }
@@ -41,11 +44,29 @@ export function renderSkillStatusChips(params: {
         ${skill.eligible ? "eligible" : "blocked"}
       </span>
       ${
+        skill.quarantined
+          ? html`
+              <span class="chip chip-warn">quarantined</span>
+            `
+          : nothing
+      }
+      ${
         skill.disabled
           ? html`
               <span class="chip chip-warn">disabled</span>
             `
           : nothing
+      }
+      ${
+        skill.auditStatus === "critical"
+          ? html`
+              <span class="chip chip-warn">critical audit</span>
+            `
+          : skill.auditStatus === "warn"
+            ? html`
+                <span class="chip">audit warn</span>
+              `
+            : nothing
       }
     </div>
   `;

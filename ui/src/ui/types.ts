@@ -347,7 +347,11 @@ export type HostedProviderStatus = {
   optInOnly: boolean;
   available: boolean;
   skipReasons: Array<
-    "no auth" | "not allowlisted" | "plugin removed" | "model missing from catalog" | "unknown provider"
+    | "no auth"
+    | "not allowlisted"
+    | "plugin removed"
+    | "model missing from catalog"
+    | "unknown provider"
   >;
 };
 
@@ -631,9 +635,31 @@ export type SkillsStatusConfigCheck = {
 
 export type SkillInstallOption = {
   id: string;
-  kind: "brew" | "node" | "go" | "uv";
+  kind: "brew" | "node" | "go" | "uv" | "download";
   label: string;
   bins: string[];
+};
+
+export type SkillAuditStatus =
+  | "not_applicable"
+  | "pending"
+  | "clean"
+  | "warn"
+  | "critical"
+  | "scan_failed";
+
+export type SkillAuditSummary = {
+  scannedFiles: number;
+  critical: number;
+  warn: number;
+  info: number;
+  findingsPreview: Array<{
+    ruleId: string;
+    severity: "info" | "warn" | "critical";
+    file: string;
+    line: number;
+    message: string;
+  }>;
 };
 
 export type SkillStatusEntry = {
@@ -650,21 +676,55 @@ export type SkillStatusEntry = {
   always: boolean;
   disabled: boolean;
   blockedByAllowlist: boolean;
+  quarantined: boolean;
+  auditStatus: SkillAuditStatus;
+  auditSummary?: SkillAuditSummary;
+  lastScannedAt?: number;
+  trustReason: string;
   eligible: boolean;
   requirements: {
     bins: string[];
+    anyBins: string[];
     env: string[];
     config: string[];
     os: string[];
   };
   missing: {
     bins: string[];
+    anyBins: string[];
     env: string[];
     config: string[];
     os: string[];
   };
   configChecks: SkillsStatusConfigCheck[];
   install: SkillInstallOption[];
+};
+
+export type SkillAuditEntry = {
+  name: string;
+  skillKey: string;
+  source: string;
+  bundled?: boolean;
+  filePath: string;
+  baseDir: string;
+  quarantined: boolean;
+  auditStatus: SkillAuditStatus;
+  auditSummary?: SkillAuditSummary;
+  lastScannedAt?: number;
+  trustReason: string;
+  findings: Array<{
+    ruleId: string;
+    severity: "info" | "warn" | "critical";
+    file: string;
+    line: number;
+    message: string;
+    evidence: string;
+  }>;
+};
+
+export type SkillsAuditReport = {
+  workspaceDir: string;
+  skills: SkillAuditEntry[];
 };
 
 export type SkillStatusReport = {

@@ -148,10 +148,17 @@ function readLastAgentCommandCall():
   | {
       message?: string;
       sessionId?: string;
+      inputProvenance?: {
+        kind?: string;
+      };
     }
   | undefined {
   return mocks.agentCommand.mock.calls.at(-1)?.[0] as
-    | { message?: string; sessionId?: string }
+    | {
+        message?: string;
+        sessionId?: string;
+        inputProvenance?: { kind?: string };
+      }
     | undefined;
 }
 
@@ -388,6 +395,38 @@ describe("gateway agent handler", () => {
     expect(callArgs.bestEffortDeliver).toBe(false);
   });
 
+  it("registers chat routing for non-main session agent runs using the caller session key", async () => {
+    mocks.loadSessionEntry.mockReturnValue({
+      cfg: {},
+      storePath: "/tmp/sessions.json",
+      entry: {
+        sessionId: "existing-session-id",
+        updatedAt: Date.now(),
+      },
+      canonicalKey: "agent:main:discord:group:req",
+    });
+    mocks.updateSessionStore.mockResolvedValue(undefined);
+    mocks.agentCommand.mockResolvedValue({
+      payloads: [{ text: "ok" }],
+      meta: { durationMs: 100 },
+    });
+
+    const context = makeContext();
+    await invokeAgent(
+      {
+        message: "follow up on worker completion",
+        sessionKey: "discord:group:req",
+        idempotencyKey: "test-non-main-chat-run",
+      },
+      { context },
+    );
+
+    expect(context.addChatRun).toHaveBeenCalledWith("test-non-main-chat-run", {
+      sessionKey: "discord:group:req",
+      clientRunId: "test-non-main-chat-run",
+    });
+  });
+
   it("keeps origin messageChannel as webchat while delivery channel uses last session channel", async () => {
     mockMainSessionEntry({
       sessionId: "existing-session-id",
@@ -523,6 +562,7 @@ describe("gateway agent handler", () => {
     expect(call?.message).toBe(BARE_SESSION_RESET_PROMPT);
     expect(call?.message).toContain("Execute your Session Startup sequence now");
     expect(call?.sessionId).toBe("reset-session-id");
+    expect(call?.inputProvenance).toMatchObject({ kind: "internal_system" });
   });
 
   it("uses /reset suffix as the post-reset message and still injects timestamp", async () => {

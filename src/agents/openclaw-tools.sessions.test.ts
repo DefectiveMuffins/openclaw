@@ -816,6 +816,85 @@ describe("sessions tools", () => {
     });
   });
 
+  it("sessions_send restarts tracked subagent runs on the subagent lane", async () => {
+    resetSubagentRegistryForTests();
+    const childKey = "agent:main:subagent:restart-send";
+    addSubagentRunForTests({
+      runId: "run-finished-send",
+      childSessionKey: childKey,
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      task: "initial investigation",
+      cleanup: "keep",
+      createdAt: Date.now() - 120_000,
+      startedAt: Date.now() - 120_000,
+      endedAt: Date.now() - 30_000,
+      outcome: { status: "ok" },
+      runTimeoutSeconds: 0,
+    });
+
+    const loadSessionStoreSpy = vi
+      .spyOn(sessionsModule, "loadSessionStore")
+      .mockImplementation(() => ({
+        [childKey]: {
+          sessionId: "child-session-restart-send",
+          updatedAt: Date.now(),
+        },
+      }));
+    callGatewayMock.mockImplementation(async (opts: unknown) => {
+      const request = opts as { method?: string };
+      if (request.method === "agent") {
+        return { runId: "run-followup-send" };
+      }
+      if (request.method === "agent.wait") {
+        return { status: "timeout" };
+      }
+      return {};
+    });
+
+    try {
+      const tool = createOpenClawTools({
+        agentSessionKey: "agent:main:main",
+      }).find((candidate) => candidate.name === "sessions_send");
+      expect(tool).toBeDefined();
+      if (!tool) {
+        throw new Error("missing sessions_send tool");
+      }
+
+      const result = await tool.execute("call-subagent-restart", {
+        sessionKey: childKey,
+        message: "expand the search",
+        timeoutSeconds: 1,
+      });
+      expect(result.details).toMatchObject({
+        status: "timeout",
+        runId: "run-followup-send",
+        sessionKey: childKey,
+      });
+
+      const agentCall = callGatewayMock.mock.calls.find(
+        (call) => (call[0] as { method?: string }).method === "agent",
+      )?.[0] as { params?: Record<string, unknown> } | undefined;
+      expect(agentCall?.params).toMatchObject({
+        sessionKey: childKey,
+        sessionId: "child-session-restart-send",
+        lane: "subagent",
+        timeout: 0,
+      });
+      expect(callGatewayMock.mock.calls.filter((call) => call[0]?.method === "agent")).toHaveLength(
+        1,
+      );
+
+      const trackedRuns = listSubagentRunsForRequester("agent:main:main");
+      expect(trackedRuns).toHaveLength(1);
+      expect(trackedRuns[0].runId).toBe("run-followup-send");
+      expect(trackedRuns[0].childSessionKey).toBe(childKey);
+      expect(trackedRuns[0].outcome?.status).toBe("timeout");
+    } finally {
+      loadSessionStoreSpy.mockRestore();
+    }
+  });
+
   it("subagents lists active and recent runs", async () => {
     resetSubagentRegistryForTests();
     const now = Date.now();

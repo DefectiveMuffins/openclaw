@@ -2,32 +2,39 @@
 summary: "macOS Skills settings UI and gateway-backed status"
 read_when:
   - Updating the macOS Skills settings UI
-  - Changing skills gating or install behavior
+  - Changing skills gating, audit, or install behavior
 title: "Skills"
 ---
 
 # Skills (macOS)
 
-The macOS app surfaces OpenClaw skills via the gateway; it does not parse skills locally.
+The macOS app surfaces OpenClaw skills via the gateway. It does not parse skills locally.
 
 ## Data source
 
-- `skills.status` (gateway) returns all skills plus eligibility and missing requirements
-  (including allowlist blocks for bundled skills).
+- `skills.status` returns all visible skills plus eligibility and missing requirements.
+- `skills.status` also returns quarantine state, audit status, audit summary, trust reason, and last scan time for third-party standalone skills.
 - Requirements are derived from `metadata.openclaw.requires` in each `SKILL.md`.
+
+## Trust and approval
+
+- New third-party standalone skills appear as **quarantined** until approved.
+- The macOS Skills UI shows the audit summary and provides approve/revoke actions.
+- If a trusted skill changes on disk, the updated fingerprint is quarantined again until re-approved.
+- Bundled skills and plugin-owned skills do not use this quarantine flow.
 
 ## Install actions
 
-- `metadata.openclaw.install` defines install options (brew/node/go/uv).
+- `metadata.openclaw.install` defines install options (brew, node, go, uv, or download).
 - The app calls `skills.install` to run installers on the gateway host.
-- The gateway surfaces only one preferred installer when multiple are provided
-  (brew when available, otherwise node manager from `skills.install`, default npm).
+- Install results include audit outcome, so a successful install can still leave the skill quarantined pending review.
+- The gateway surfaces one preferred installer when multiple are provided, except download-only skills, which can expose multiple artifacts.
 
-## Env/API keys
+## Env and API keys
 
 - The app stores keys in `~/.openclaw/openclaw.json` under `skills.entries.<skillKey>`.
 - `skills.update` patches `enabled`, `apiKey`, and `env`.
 
 ## Remote mode
 
-- Install + config updates happen on the gateway host (not the local Mac).
+- Install, audit, and config updates happen on the gateway host, not the local Mac.

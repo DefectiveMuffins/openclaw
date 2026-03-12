@@ -66,6 +66,8 @@ describe("tool-policy", () => {
     const manager = resolveToolProfilePolicy("manager");
     expect(manager?.allow).toContain("sessions_spawn");
     expect(manager?.allow).toContain("sessions_history");
+    expect(manager?.allow).toContain("models_list");
+    expect(manager?.allow).toContain("subagent_review");
     expect(manager?.allow).toContain("read");
     expect(manager?.allow).not.toContain("exec");
     expect(manager?.allow).not.toContain("write");

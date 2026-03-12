@@ -46,6 +46,7 @@ describe("agent event handler", () => {
     const nodeSendToSession = vi.fn();
     const agentRunSeq = new Map<string, number>();
     const chatRunState = createChatRunState();
+    const chatHistorySnapshots = new Map();
     const toolEventRecipients = createToolEventRecipientRegistry();
 
     const handler = createAgentEventHandler({
@@ -54,6 +55,7 @@ describe("agent event handler", () => {
       nodeSendToSession,
       agentRunSeq,
       chatRunState,
+      chatHistorySnapshots,
       resolveSessionKeyForRun: params?.resolveSessionKeyForRun ?? (() => undefined),
       clearAgentRunContext: vi.fn(),
       toolEventRecipients,
@@ -66,6 +68,7 @@ describe("agent event handler", () => {
       nodeSendToSession,
       agentRunSeq,
       chatRunState,
+      chatHistorySnapshots,
       toolEventRecipients,
       handler,
     };
@@ -263,6 +266,35 @@ describe("agent event handler", () => {
     };
     expect(payload.message?.content?.[0]?.text).toBe("No");
     expect(sessionChatCalls(nodeSendToSession)).toHaveLength(1);
+    nowSpy?.mockRestore();
+  });
+
+  it("updates the chat history snapshot when a run finishes with a final assistant reply", () => {
+    const { chatHistorySnapshots, chatRunState, handler, nowSpy } = createHarness({
+      now: 2_300,
+    });
+    chatRunState.registry.add("run-snapshot", {
+      sessionKey: "session-snapshot",
+      clientRunId: "client-snapshot",
+    });
+
+    handler({
+      runId: "run-snapshot",
+      seq: 1,
+      stream: "assistant",
+      ts: Date.now(),
+      data: { text: "persist me on refresh" },
+    });
+    emitLifecycleEnd(handler, "run-snapshot");
+
+    expect(chatHistorySnapshots.get("session-snapshot")).toMatchObject({
+      messages: [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "persist me on refresh" }],
+        },
+      ],
+    });
     nowSpy?.mockRestore();
   });
 

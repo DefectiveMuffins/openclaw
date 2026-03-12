@@ -1,6 +1,12 @@
 import crypto from "node:crypto";
 import { Type } from "@sinclair/typebox";
+import { AGENT_LANE_SUBAGENT } from "../lanes.js";
+import {
+  replaceSubagentRunForFollowup,
+  resolveLatestSubagentRunForChildSession,
+} from "../subagent-registry.js";
 import { loadConfig } from "../../config/config.js";
+import { loadSessionStore, resolveStorePath } from "../../config/sessions.js";
 import { callGateway } from "../../gateway/call.js";
 import { normalizeAgentId, resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
 import { SESSION_LABEL_MAX_LENGTH } from "../../sessions/session-label.js";
@@ -217,26 +223,35 @@ export function createSessionsSendTool(opts?: {
         requesterChannel: opts?.agentChannel,
         targetSessionKey: displayKey,
       });
-      const sendParams = {
-        message,
-        sessionKey: resolvedKey,
-        idempotencyKey,
-        deliver: false,
-        channel: INTERNAL_MESSAGE_CHANNEL,
-        lane: AGENT_LANE_NESTED,
-        extraSystemPrompt: agentMessageContext,
-        inputProvenance: {
-          kind: "inter_session",
-          sourceSessionKey: opts?.agentSessionKey,
-          sourceChannel: opts?.agentChannel,
-          sourceTool: "sessions_send",
-        },
-      };
       const requesterSessionKey = opts?.agentSessionKey;
       const requesterChannel = opts?.agentChannel;
       const maxPingPongTurns = resolvePingPongTurns(cfg);
       const delivery = { status: "pending", mode: "announce" as const };
+      const isSubagentTarget = /^agent:[^:]+:subagent:/.test(resolvedKey);
+      const trackedSubagentRun = isSubagentTarget
+        ? resolveLatestSubagentRunForChildSession(resolvedKey) ?? undefined
+        : undefined;
+      const subagentSessionId = (() => {
+        if (!isSubagentTarget) {
+          return undefined;
+        }
+        try {
+          const storePath = resolveStorePath(cfg.session?.store, {
+            agentId: resolveAgentIdFromSessionKey(resolvedKey),
+          });
+          const store = loadSessionStore(storePath);
+          const entry = store[resolvedKey];
+          return typeof entry?.sessionId === "string" && entry.sessionId.trim()
+            ? entry.sessionId.trim()
+            : undefined;
+        } catch {
+          return undefined;
+        }
+      })();
       const startA2AFlow = (roundOneReply?: string, waitRunId?: string) => {
+        if (isSubagentTarget) {
+          return;
+        }
         void runSessionsSendA2AFlow({
           targetSessionKey: resolvedKey,
           displayKey,
@@ -249,6 +264,34 @@ export function createSessionsSendTool(opts?: {
           waitRunId,
         });
       };
+      const replaceTrackedSubagentRun = () => {
+        if (!trackedSubagentRun || !runId || runId === trackedSubagentRun.runId) {
+          return;
+        }
+        replaceSubagentRunForFollowup({
+          previousRunId: trackedSubagentRun.runId,
+          nextRunId: runId,
+          fallback: trackedSubagentRun,
+          runTimeoutSeconds: trackedSubagentRun.runTimeoutSeconds ?? 0,
+        });
+      };
+      const sendParams = {
+        message,
+        sessionKey: resolvedKey,
+        ...(isSubagentTarget && subagentSessionId ? { sessionId: subagentSessionId } : {}),
+        idempotencyKey,
+        deliver: false,
+        channel: INTERNAL_MESSAGE_CHANNEL,
+        lane: isSubagentTarget ? AGENT_LANE_SUBAGENT : AGENT_LANE_NESTED,
+        extraSystemPrompt: agentMessageContext,
+        ...(isSubagentTarget ? { timeout: 0 } : {}),
+        inputProvenance: {
+          kind: "inter_session",
+          sourceSessionKey: opts?.agentSessionKey,
+          sourceChannel: opts?.agentChannel,
+          sourceTool: "sessions_send",
+        },
+      };
 
       if (timeoutSeconds === 0) {
         try {
@@ -260,6 +303,7 @@ export function createSessionsSendTool(opts?: {
           if (typeof response?.runId === "string" && response.runId) {
             runId = response.runId;
           }
+          replaceTrackedSubagentRun();
           startA2AFlow(undefined, runId);
           return jsonResult({
             runId,
@@ -324,6 +368,7 @@ export function createSessionsSendTool(opts?: {
       }
 
       if (waitStatus === "timeout") {
+        replaceTrackedSubagentRun();
         return jsonResult({
           runId,
           status: "timeout",

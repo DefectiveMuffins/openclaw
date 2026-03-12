@@ -5,6 +5,10 @@ import { loadConfig } from "../config/config.js";
 import { type AgentEventPayload, getAgentRunContext } from "../infra/agent-events.js";
 import { resolveHeartbeatVisibility } from "../infra/heartbeat-visibility.js";
 import { stripInlineDirectiveTagsForDisplay } from "../utils/directive-tags.js";
+import {
+  appendChatHistorySnapshotMessage,
+  type ChatHistorySnapshotStore,
+} from "./chat-history-snapshots.js";
 import { loadSessionEntry } from "./session-utils.js";
 import { formatForLog } from "./ws-log.js";
 
@@ -276,6 +280,7 @@ export type AgentEventHandlerOptions = {
   nodeSendToSession: NodeSendToSession;
   agentRunSeq: Map<string, number>;
   chatRunState: ChatRunState;
+  chatHistorySnapshots?: ChatHistorySnapshotStore;
   resolveSessionKeyForRun: (runId: string) => string | undefined;
   clearAgentRunContext: (runId: string) => void;
   toolEventRecipients: ToolEventRecipientRegistry;
@@ -287,6 +292,7 @@ export function createAgentEventHandler({
   nodeSendToSession,
   agentRunSeq,
   chatRunState,
+  chatHistorySnapshots,
   resolveSessionKeyForRun,
   clearAgentRunContext,
   toolEventRecipients,
@@ -355,19 +361,27 @@ export function createAgentEventHandler({
     chatRunState.buffers.delete(clientRunId);
     chatRunState.deltaSentAt.delete(clientRunId);
     if (jobState === "done") {
+      const finalMessage =
+        text && !shouldSuppressSilent
+          ? {
+              role: "assistant",
+              content: [{ type: "text", text }],
+              timestamp: Date.now(),
+            }
+          : undefined;
+      if (finalMessage) {
+        appendChatHistorySnapshotMessage({
+          store: chatHistorySnapshots,
+          sessionKey,
+          message: finalMessage,
+        });
+      }
       const payload = {
         runId: clientRunId,
         sessionKey,
         seq,
         state: "final" as const,
-        message:
-          text && !shouldSuppressSilent
-            ? {
-                role: "assistant",
-                content: [{ type: "text", text }],
-                timestamp: Date.now(),
-              }
-            : undefined,
+        message: finalMessage,
       };
       broadcast("chat", payload);
       nodeSendToSession(sessionKey, "chat", payload);

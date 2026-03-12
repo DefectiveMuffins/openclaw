@@ -74,6 +74,40 @@ that up as `<workspace>/skills` on the next session.
   for that agent turn (not the sandbox). Keep secrets out of prompts and logs.
 - For a broader threat model and checklists, see [Security](/gateway/security).
 
+## Trust and audit
+
+OpenClaw applies a trust gate to **third-party standalone skills**:
+
+- Covered sources: workspace skills, managed skills, and extra skill directories.
+- Exempt sources: OpenClaw-bundled skills and plugin-owned skill directories.
+- New third-party standalone skills are scanned and start **quarantined** until the operator approves the current fingerprint.
+- If a trusted skill changes on disk, the new fingerprint is quarantined again until re-approved.
+- Quarantined skills are excluded from prompt injection, native skill commands, and normal eligibility.
+
+Upgrade behavior is intentionally softer for existing installs:
+
+- Existing clean third-party skills remain usable after the first audit.
+- Existing warn-only third-party skills remain usable but are surfaced for review.
+- Existing skills with critical findings, or skills that fail scanning, are quarantined.
+
+The trust decision is tied to the resolved skill directory plus the current content fingerprint, not just the skill name.
+
+### What gets scanned
+
+The built-in scanner covers the main standalone skill surface:
+
+- `SKILL.md`
+- Python files (`.py`)
+- Shell scripts (`.sh`, `.bash`, `.zsh`)
+- Extensionless executable or shebang files
+
+It looks for risky patterns such as download-and-run commands, subprocess execution, dynamic code execution, possible environment exfiltration, and obfuscated payloads. This is a static heuristic audit, not a full sandbox or guarantee.
+
+Use the CLI or gateway APIs to review and approve skills:
+
+- CLI: `openclaw skills audit`, `openclaw skills trust approve <name>`, `openclaw skills trust revoke <name>`
+- Gateway: `skills.audit`, `skills.trust`
+
 ## Format (AgentSkills + Pi-compatible)
 
 `SKILL.md` must include at least:

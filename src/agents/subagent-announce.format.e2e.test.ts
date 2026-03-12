@@ -21,6 +21,7 @@ type SubagentDeliveryTargetResult = {
 
 const agentSpy = vi.fn(async (_req: AgentCallRequest) => ({ runId: "run-main", status: "ok" }));
 const sendSpy = vi.fn(async (_req: AgentCallRequest) => ({ runId: "send-main", status: "ok" }));
+const agentWaitSpy = vi.fn(async (_req: AgentCallRequest) => ({ status: "timeout" }));
 const sessionsDeleteSpy = vi.fn((_req: AgentCallRequest) => undefined);
 const readLatestAssistantReplyMock = vi.fn(
   async (_sessionKey?: string): Promise<string | undefined> => "raw subagent reply",
@@ -53,6 +54,10 @@ const hookRunnerMock = {
 };
 const chatHistoryMock = vi.fn(async (_sessionKey?: string) => ({
   messages: [] as Array<unknown>,
+}));
+const localAgentCommandMock = vi.fn(async () => ({
+  payloads: [{ text: "local follow-up started" }],
+  meta: { durationMs: 1 },
 }));
 let sessionStore: Record<string, Record<string, unknown>> = {};
 let configOverride: ReturnType<(typeof import("../config/config.js"))["loadConfig"]> = {
@@ -98,7 +103,7 @@ vi.mock("../gateway/call.js", () => ({
       return await sendSpy(typed);
     }
     if (typed.method === "agent.wait") {
-      return { status: "error", startedAt: 10, endedAt: 20, error: "boom" };
+      return await agentWaitSpy(typed);
     }
     if (typed.method === "chat.history") {
       return await chatHistoryMock(typed.params?.sessionKey);
@@ -160,6 +165,14 @@ vi.mock("../config/config.js", async (importOriginal) => {
   };
 });
 
+vi.mock("../commands/agent.js", () => ({
+  agentCommand: localAgentCommandMock,
+}));
+
+vi.mock("../cli/deps.js", () => ({
+  createDefaultDeps: vi.fn(() => ({})),
+}));
+
 describe("subagent announce formatting", () => {
   let previousFastTestEnv: string | undefined;
   let runSubagentAnnounceFlow: (typeof import("./subagent-announce.js"))["runSubagentAnnounceFlow"];
@@ -191,6 +204,13 @@ describe("subagent announce formatting", () => {
     sendSpy
       .mockClear()
       .mockImplementation(async (_req: AgentCallRequest) => ({ runId: "send-main", status: "ok" }));
+    agentWaitSpy.mockClear().mockImplementation(async (req: AgentCallRequest) => {
+      const runId = typeof req.params?.runId === "string" ? req.params.runId : "";
+      if (runId.startsWith("run-main")) {
+        return { status: "timeout" };
+      }
+      return { status: "error", startedAt: 10, endedAt: 20, error: "boom" };
+    });
     sessionsDeleteSpy.mockClear().mockImplementation((_req: AgentCallRequest) => undefined);
     embeddedRunMock.isEmbeddedPiRunActive.mockClear().mockReturnValue(false);
     embeddedRunMock.isEmbeddedPiRunStreaming.mockClear().mockReturnValue(false);
@@ -215,6 +235,9 @@ describe("subagent announce formatting", () => {
     subagentDeliveryTargetHookMock.mockReset().mockResolvedValue(undefined);
     readLatestAssistantReplyMock.mockClear().mockResolvedValue("raw subagent reply");
     chatHistoryMock.mockReset().mockResolvedValue({ messages: [] });
+    localAgentCommandMock
+      .mockClear()
+      .mockResolvedValue({ payloads: [{ text: "local follow-up started" }], meta: { durationMs: 1 } });
     sessionStore = {};
     sessionBindingServiceTesting.resetSessionBindingAdaptersForTests();
     configOverride = {
@@ -594,6 +617,126 @@ describe("subagent announce formatting", () => {
     expect(didAnnounce).toBe(true);
     expect(agentSpy).toHaveBeenCalledTimes(3);
     expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("treats an accepted requester-session follow-up as delivered after a brief verification wait", async () => {
+    sessionStore = {
+      "agent:main:subagent:test": {
+        sessionId: "child-session-webchat",
+      },
+      "agent:main:main": {
+        sessionId: "requester-session-webchat",
+      },
+    };
+    agentSpy.mockResolvedValueOnce({ runId: "run-main-accepted", status: "accepted" });
+
+    const didAnnounce = await runSubagentAnnounceFlow({
+      childSessionKey: "agent:main:subagent:test",
+      childRunId: "run-direct-agent-accepted",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      requesterOrigin: { channel: "webchat" },
+      ...defaultOutcomeAnnounce,
+      expectsCompletionMessage: true,
+      roundOneReply: "worker result",
+    });
+
+    expect(didAnnounce).toBe(true);
+    expect(agentSpy).toHaveBeenCalledTimes(1);
+    expect(agentWaitSpy).toHaveBeenCalledTimes(1);
+    expect(agentWaitSpy.mock.calls[0]?.[0]).toMatchObject({
+      method: "agent.wait",
+      params: {
+        runId: "run-main-accepted",
+        timeoutMs: 25,
+      },
+    });
+    expect(sendSpy).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a local requester follow-up when an accepted internal follow-up run errors immediately", async () => {
+    sessionStore = {
+      "agent:main:subagent:test": {
+        sessionId: "child-session-webchat",
+      },
+      "agent:main:main": {
+        sessionId: "requester-session-webchat",
+        channel: "webchat",
+        deliveryContext: {
+          channel: "webchat",
+        },
+      },
+    };
+    agentSpy.mockResolvedValueOnce({ runId: "run-main-accepted-error", status: "accepted" });
+    agentWaitSpy.mockResolvedValueOnce({
+      status: "error",
+      startedAt: 10,
+      endedAt: 20,
+      error: "top-level follow-up failed",
+    });
+
+    const didAnnounce = await runSubagentAnnounceFlow({
+      childSessionKey: "agent:main:subagent:test",
+      childRunId: "run-direct-agent-accepted-error",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      requesterOrigin: { channel: "webchat" },
+      ...defaultOutcomeAnnounce,
+      expectsCompletionMessage: true,
+      roundOneReply: "worker result",
+    });
+
+    expect(didAnnounce).toBe(true);
+    expect(agentSpy).toHaveBeenCalledTimes(1);
+    expect(agentWaitSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).not.toHaveBeenCalled();
+    expect(localAgentCommandMock).toHaveBeenCalledTimes(1);
+    expect(localAgentCommandMock.mock.calls[0]?.[0]).toMatchObject({
+      sessionKey: "agent:main:main",
+      sessionId: "requester-session-webchat",
+      deliver: false,
+      messageChannel: "webchat",
+      runId: "announce:v1:agent:main:subagent:test:run-direct-agent-accepted-error:local",
+    });
+  });
+
+  it("falls back to a local requester follow-up when direct handoff fails for an internal session", async () => {
+    sessionStore = {
+      "agent:main:subagent:test": {
+        sessionId: "child-session-webchat",
+      },
+      "agent:main:main": {
+        sessionId: "requester-session-webchat",
+        channel: "webchat",
+        deliveryContext: {
+          channel: "webchat",
+        },
+      },
+    };
+    agentSpy.mockRejectedValueOnce(new Error("invalid agent params: failed handoff"));
+
+    const didAnnounce = await runSubagentAnnounceFlow({
+      childSessionKey: "agent:main:subagent:test",
+      childRunId: "run-direct-agent-local-fallback",
+      requesterSessionKey: "agent:main:main",
+      requesterDisplayKey: "main",
+      requesterOrigin: { channel: "webchat" },
+      ...defaultOutcomeAnnounce,
+      expectsCompletionMessage: true,
+      roundOneReply: "worker result",
+    });
+
+    expect(didAnnounce).toBe(true);
+    expect(agentSpy).toHaveBeenCalledTimes(1);
+    expect(sendSpy).not.toHaveBeenCalled();
+    expect(localAgentCommandMock).toHaveBeenCalledTimes(1);
+    expect(localAgentCommandMock.mock.calls[0]?.[0]).toMatchObject({
+      sessionKey: "agent:main:main",
+      sessionId: "requester-session-webchat",
+      deliver: false,
+      messageChannel: "webchat",
+      runId: "announce:v1:agent:main:subagent:test:run-direct-agent-local-fallback:local",
+    });
   });
 
   it("keeps completion-mode delivery coordinated when sibling runs are still active", async () => {
@@ -1661,7 +1804,7 @@ describe("subagent announce formatting", () => {
     };
     expect(call?.params?.channel).toBe(testCase.expectedChannel);
     expect(call?.params?.accountId).toBe(testCase.expectedAccountId);
-    expect(call?.expectFinal).toBe(true);
+    expect(call?.expectFinal).not.toBe(true);
   });
 
   it("injects direct announce into requester subagent session instead of chat channel", async () => {

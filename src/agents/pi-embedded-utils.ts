@@ -9,6 +9,58 @@ export function isAssistantMessage(msg: AgentMessage | undefined): msg is Assist
   return msg?.role === "assistant";
 }
 
+export type AssistantVisibleTextSource = "text" | "compat_reasoning" | "none";
+
+const OPENAI_COMPAT_VISIBLE_REASONING_SIGNATURES = new Set([
+  "reasoning_content",
+  "reasoning",
+  "reasoning_text",
+]);
+
+function sanitizeAssistantVisibleText(text: string): string {
+  return stripThinkingTagsFromText(stripDowngradedToolCallText(stripMinimaxToolCallXml(text))).trim();
+}
+
+function hasStructuredToolCalls(content: AssistantMessage["content"]): boolean {
+  if (!Array.isArray(content)) {
+    return false;
+  }
+  return content.some(
+    (block) =>
+      !!block &&
+      typeof block === "object" &&
+      (block as { type?: unknown }).type === "toolCall",
+  );
+}
+
+function extractOpenAiCompatReasoningFallbackText(content: AssistantMessage["content"]): string {
+  if (!Array.isArray(content) || hasStructuredToolCalls(content)) {
+    return "";
+  }
+  const blocks = content
+    .map((block) => {
+      if (!block || typeof block !== "object") {
+        return "";
+      }
+      const record = block as {
+        type?: unknown;
+        thinking?: unknown;
+        thinkingSignature?: unknown;
+      };
+      if (record.type !== "thinking" || typeof record.thinking !== "string") {
+        return "";
+      }
+      const signature =
+        typeof record.thinkingSignature === "string" ? record.thinkingSignature.trim() : "";
+      if (!OPENAI_COMPAT_VISIBLE_REASONING_SIGNATURES.has(signature)) {
+        return "";
+      }
+      return sanitizeAssistantVisibleText(record.thinking);
+    })
+    .filter(Boolean);
+  return blocks.join("\n").trim();
+}
+
 /**
  * Strip malformed Minimax tool invocations that leak into text content.
  * Minimax sometimes embeds tool calls as XML in text blocks instead of
@@ -208,19 +260,50 @@ export function stripThinkingTagsFromText(text: string): string {
 }
 
 export function extractAssistantText(msg: AssistantMessage): string {
+  return extractAssistantVisibleText(msg).text;
+}
+
+export function extractAssistantVisibleText(msg: AssistantMessage): {
+  text: string;
+  source: AssistantVisibleTextSource;
+} {
   const extracted =
     extractTextFromChatContent(msg.content, {
-      sanitizeText: (text) =>
-        stripThinkingTagsFromText(
-          stripDowngradedToolCallText(stripMinimaxToolCallXml(text)),
-        ).trim(),
+      sanitizeText: sanitizeAssistantVisibleText,
       joinWith: "\n",
       normalizeText: (text) => text.trim(),
     }) ?? "";
   // Only apply keyword-based error rewrites when the assistant message is actually an error.
   // Otherwise normal prose that *mentions* errors (e.g. "context overflow") can get clobbered.
   const errorContext = msg.stopReason === "error" || Boolean(msg.errorMessage?.trim());
-  return sanitizeUserFacingText(extracted, { errorContext });
+  const visibleText = sanitizeUserFacingText(extracted, { errorContext });
+  if (visibleText) {
+    return {
+      text: visibleText,
+      source: "text",
+    };
+  }
+  if (
+    errorContext ||
+    msg.stopReason === "toolUse" ||
+    hasStructuredToolCalls(msg.content)
+  ) {
+    return {
+      text: "",
+      source: "none",
+    };
+  }
+  const compatReasoningText = extractOpenAiCompatReasoningFallbackText(msg.content);
+  if (!compatReasoningText) {
+    return {
+      text: "",
+      source: "none",
+    };
+  }
+  return {
+    text: sanitizeUserFacingText(compatReasoningText, { errorContext: false }),
+    source: "compat_reasoning",
+  };
 }
 
 export function extractAssistantThinking(msg: AssistantMessage): string {

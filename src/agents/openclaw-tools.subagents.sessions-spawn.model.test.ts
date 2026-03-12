@@ -276,6 +276,91 @@ describe("openclaw-tools: subagents (sessions_spawn model + thinking)", () => {
     expect(calls.some((call) => call.method === "agent")).toBe(false);
   });
 
+  it("requires explicit model in top-level hard delegation mode", async () => {
+    setSessionsSpawnConfigOverride({
+      session: { mainKey: "main", scope: "per-sender" },
+      agents: {
+        defaults: {
+          subagents: {
+            delegation: {
+              mode: "hard",
+              scope: "all",
+            },
+          },
+        },
+      },
+    });
+
+    const calls: GatewayCall[] = [];
+    callGatewayMock.mockImplementation(async (opts: unknown) => {
+      calls.push(opts as GatewayCall);
+      return {};
+    });
+
+    const tool = await getSessionsSpawnTool({
+      agentSessionKey: "agent:research:main",
+      agentChannel: "discord",
+    });
+
+    const result = await tool.execute("call-hard-model-required", {
+      task: "investigate issue",
+    });
+
+    expect(result.details).toMatchObject({
+      status: "error",
+    });
+    expect(String((result.details as { error?: string }).error ?? "")).toContain(
+      "requires sessions_spawn.model",
+    );
+    expect(calls).toHaveLength(0);
+  });
+
+  it("rejects disallowed models in top-level hard delegation mode", async () => {
+    setSessionsSpawnConfigOverride({
+      session: { mainKey: "main", scope: "per-sender" },
+      agents: {
+        defaults: {
+          model: { primary: "openai/gpt-allowed" },
+          models: {
+            "openai/gpt-allowed": {
+              alias: "allowed",
+            },
+          },
+          subagents: {
+            delegation: {
+              mode: "hard",
+              scope: "all",
+            },
+          },
+        },
+      },
+    });
+
+    const calls: GatewayCall[] = [];
+    callGatewayMock.mockImplementation(async (opts: unknown) => {
+      calls.push(opts as GatewayCall);
+      return {};
+    });
+
+    const tool = await getSessionsSpawnTool({
+      agentSessionKey: "agent:research:main",
+      agentChannel: "discord",
+    });
+
+    const result = await tool.execute("call-hard-model-disallowed", {
+      task: "investigate issue",
+      model: "openai/gpt-disallowed",
+    });
+
+    expect(result.details).toMatchObject({
+      status: "error",
+    });
+    expect(String((result.details as { error?: string }).error ?? "")).toContain(
+      "sessions_spawn.model model not allowed",
+    );
+    expect(calls).toHaveLength(0);
+  });
+
   it("sessions_spawn supports legacy timeoutSeconds alias", async () => {
     let spawnedTimeout: number | undefined;
 

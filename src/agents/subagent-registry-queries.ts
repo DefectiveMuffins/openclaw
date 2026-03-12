@@ -36,6 +36,20 @@ export function resolveRequesterForChildSessionFromRuns(
   requesterSessionKey: string;
   requesterOrigin?: DeliveryContext;
 } | null {
+  const best = resolveLatestRunForChildSessionFromRuns(runs, childSessionKey);
+  if (!best) {
+    return null;
+  }
+  return {
+    requesterSessionKey: best.requesterSessionKey,
+    requesterOrigin: best.requesterOrigin,
+  };
+}
+
+export function resolveLatestRunForChildSessionFromRuns(
+  runs: Map<string, SubagentRunRecord>,
+  childSessionKey: string,
+): SubagentRunRecord | null {
   const key = childSessionKey.trim();
   if (!key) {
     return null;
@@ -52,10 +66,7 @@ export function resolveRequesterForChildSessionFromRuns(
   if (!best) {
     return null;
   }
-  return {
-    requesterSessionKey: best.requesterSessionKey,
-    requesterOrigin: best.requesterOrigin,
-  };
+  return best;
 }
 
 export function countActiveRunsForSessionFromRuns(

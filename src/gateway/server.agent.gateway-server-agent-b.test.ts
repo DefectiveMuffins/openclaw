@@ -292,6 +292,7 @@ describe("gateway server agent", () => {
     expect(call.message).toContain("Execute your Session Startup sequence now");
     expect(typeof call.sessionId).toBe("string");
     expect(call.sessionId).not.toBe("sess-main-before-reset");
+    expect(call.inputProvenance).toMatchObject({ kind: "internal_system" });
   });
 
   test("agent ack response then final response", { timeout: 8000 }, async () => {
@@ -404,6 +405,78 @@ describe("gateway server agent", () => {
     const payload = evt.payload && typeof evt.payload === "object" ? evt.payload : {};
     expect(payload.sessionKey).toBe("main");
     expect(payload.runId).toBe("run-auto-1");
+
+    webchatWs.close();
+  });
+
+  test("agent follow-up runs stream chat updates on the requested session key", async () => {
+    await writeMainSessionEntry({ sessionId: "sess-main-followup" });
+
+    const webchatWs = await connectWebchatClient({ port });
+    vi.mocked(agentCommand).mockImplementationOnce(async (opts) => {
+      const runId = String((opts as { runId?: string }).runId ?? "run-followup");
+      emitAgentEvent({
+        runId,
+        stream: "assistant",
+        data: { text: "worker findings ready" },
+      });
+      emitAgentEvent({
+        runId,
+        stream: "lifecycle",
+        data: { phase: "end" },
+      });
+      return {
+        payloads: [{ text: "worker findings ready" }],
+        meta: { durationMs: 1 },
+      } as never;
+    });
+
+    const finalChatP = onceMessage(
+      webchatWs,
+      (o) => {
+        if (o.type !== "event" || o.event !== "chat") {
+          return false;
+        }
+        const payload = o.payload as
+          | {
+              state?: unknown;
+              runId?: unknown;
+              sessionKey?: unknown;
+            }
+          | undefined;
+        return (
+          payload?.state === "final" &&
+          payload.runId === "idem-agent-followup-session" &&
+          payload.sessionKey === "main"
+        );
+      },
+      8000,
+    );
+
+    const finalResP = onceMessage(
+      ws,
+      (o) => o.type === "res" && o.id === "ag-followup-session" && o.payload?.status !== "accepted",
+      8000,
+    );
+    ws.send(
+      JSON.stringify({
+        type: "req",
+        id: "ag-followup-session",
+        method: "agent",
+        params: {
+          message: "continue with the child result",
+          sessionKey: "main",
+          idempotencyKey: "idem-agent-followup-session",
+        },
+      }),
+    );
+    const finalRes = await finalResP;
+    expect(finalRes.payload?.status).toBe("ok");
+
+    const evt = await finalChatP;
+    const payload = evt.payload && typeof evt.payload === "object" ? evt.payload : {};
+    expect(payload.sessionKey).toBe("main");
+    expect(payload.runId).toBe("idem-agent-followup-session");
 
     webchatWs.close();
   });

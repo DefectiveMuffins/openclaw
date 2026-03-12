@@ -568,6 +568,7 @@ export async function runEmbeddedAttempt(
       modelId: params.modelId,
       delegationRequired: params.delegationRequired,
       prompt: params.prompt,
+      inputProvenance: params.inputProvenance,
     });
     const toolProfile = effectiveToolPolicy.providerProfile ?? effectiveToolPolicy.profile;
     const effectiveFsWorkspaceOnly = resolveAttemptFsWorkspaceOnly({

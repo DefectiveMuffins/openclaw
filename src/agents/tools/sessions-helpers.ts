@@ -30,6 +30,7 @@ export {
 import { extractTextFromChatContent } from "../../shared/chat-content.js";
 import { sanitizeUserFacingText } from "../pi-embedded-helpers.js";
 import {
+  extractAssistantVisibleText,
   stripDowngradedToolCallText,
   stripMinimaxToolCallXml,
   stripThinkingTagsFromText,
@@ -166,6 +167,9 @@ export function extractAssistantText(message: unknown): string | undefined {
   const errorMessage = (message as { errorMessage?: unknown }).errorMessage;
   const errorContext =
     stopReason === "error" || (typeof errorMessage === "string" && Boolean(errorMessage.trim()));
-
-  return joined ? sanitizeUserFacingText(joined, { errorContext }) : undefined;
+  if (joined) {
+    return sanitizeUserFacingText(joined, { errorContext });
+  }
+  const visible = extractAssistantVisibleText(message as Parameters<typeof extractAssistantVisibleText>[0]);
+  return visible.text || undefined;
 }

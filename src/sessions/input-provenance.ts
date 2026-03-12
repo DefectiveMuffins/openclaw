@@ -6,6 +6,8 @@ export const INPUT_PROVENANCE_KIND_VALUES = [
   "internal_system",
 ] as const;
 
+export const TASK_COMPLETION_FOLLOW_UP_SOURCE_TOOL = "task_completion_followup";
+
 export type InputProvenanceKind = (typeof INPUT_PROVENANCE_KIND_VALUES)[number];
 
 export type InputProvenance = {
@@ -67,6 +69,24 @@ export function applyInputProvenanceToUserMessage(
 
 export function isInterSessionInputProvenance(value: unknown): boolean {
   return normalizeInputProvenance(value)?.kind === "inter_session";
+}
+
+export function createTaskCompletionFollowUpInputProvenance(params?: {
+  sourceSessionKey?: string;
+}): InputProvenance {
+  return {
+    kind: "inter_session",
+    sourceSessionKey: normalizeOptionalString(params?.sourceSessionKey),
+    sourceTool: TASK_COMPLETION_FOLLOW_UP_SOURCE_TOOL,
+  };
+}
+
+export function isTaskCompletionFollowUpInputProvenance(value: unknown): boolean {
+  const provenance = normalizeInputProvenance(value);
+  return (
+    provenance?.kind === "inter_session" &&
+    provenance.sourceTool === TASK_COMPLETION_FOLLOW_UP_SOURCE_TOOL
+  );
 }
 
 export function hasInterSessionUserProvenance(

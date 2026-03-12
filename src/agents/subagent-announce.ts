@@ -15,6 +15,7 @@ import type { ConversationRef } from "../infra/outbound/session-binding-service.
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 import { normalizeAccountId, normalizeMainKey } from "../routing/session-key.js";
 import { defaultRuntime } from "../runtime.js";
+import { createTaskCompletionFollowUpInputProvenance } from "../sessions/input-provenance.js";
 import { extractTextFromChatContent } from "../shared/chat-content.js";
 import {
   type DeliveryContext,
@@ -22,7 +23,11 @@ import {
   mergeDeliveryContext,
   normalizeDeliveryContext,
 } from "../utils/delivery-context.js";
-import { isDeliverableMessageChannel, isInternalMessageChannel } from "../utils/message-channel.js";
+import {
+  INTERNAL_MESSAGE_CHANNEL,
+  isDeliverableMessageChannel,
+  isInternalMessageChannel,
+} from "../utils/message-channel.js";
 import { resolveSessionAgentId } from "./agent-scope.js";
 import { applyDelegationDeltaToAgenticCounters } from "./agentic-counters.js";
 import {
@@ -48,6 +53,7 @@ import { summarizeDelegationReportMetrics } from "./subagent-metrics.js";
 import {
   buildDelegationContractPromptLines,
   getSubagentReportWorkingSetText,
+  parseStructuredSubagentResult,
   type SubagentDelegationRole,
   type SubagentResponseFormat,
 } from "./subagent-result-contract.js";
@@ -60,6 +66,7 @@ import { isAnnounceSkip } from "./tools/sessions-send-helpers.js";
 const FAST_TEST_MODE = process.env.OPENCLAW_TEST_FAST === "1";
 const FAST_TEST_RETRY_INTERVAL_MS = 8;
 const FAST_TEST_REPLY_CHANGE_WAIT_MS = 20;
+const DIRECT_REQUESTER_FOLLOW_UP_VERIFY_TIMEOUT_MS = FAST_TEST_MODE ? 25 : 5_000;
 const DEFAULT_SUBAGENT_ANNOUNCE_TIMEOUT_MS = 60_000;
 const MAX_TIMER_SAFE_TIMEOUT_MS = 2_147_000_000;
 const DIRECT_ANNOUNCE_TRANSIENT_RETRY_DELAYS_MS = FAST_TEST_MODE
@@ -71,6 +78,23 @@ type ToolResultMessage = {
   role?: unknown;
   content?: unknown;
 };
+
+function buildAnnounceInputProvenance(
+  events?: AgentInternalEvent[],
+):
+  | ReturnType<typeof createTaskCompletionFollowUpInputProvenance>
+  | undefined {
+  const completionEvent = events?.find(
+    (event): event is Extract<AgentInternalEvent, { type: "task_completion" }> =>
+      event.type === "task_completion",
+  );
+  if (!completionEvent) {
+    return undefined;
+  }
+  return createTaskCompletionFollowUpInputProvenance({
+    sourceSessionKey: completionEvent.childSessionKey,
+  });
+}
 
 function resolveSubagentAnnounceTimeoutMs(cfg: ReturnType<typeof loadConfig>): number {
   const configured = cfg.agents?.defaults?.subagents?.announceTimeoutMs;
@@ -624,6 +648,7 @@ async function sendAnnounce(item: AnnounceQueueItem) {
       threadId: requesterIsSubagent ? undefined : threadId,
       deliver: !requesterIsSubagent,
       internalEvents: item.internalEvents,
+      inputProvenance: buildAnnounceInputProvenance(item.internalEvents),
       idempotencyKey,
     },
     timeoutMs: announceTimeoutMs,
@@ -660,6 +685,130 @@ function loadRequesterSessionEntry(requesterSessionKey: string) {
   const store = loadSessionStore(storePath);
   const entry = store[canonicalKey];
   return { cfg, entry, canonicalKey };
+}
+
+async function maybeStartLocalRequesterFollowUp(params: {
+  requesterSessionKey: string;
+  triggerMessage: string;
+  internalEvents?: AgentInternalEvent[];
+  directIdempotencyKey: string;
+  deliverExternally: boolean;
+  directChannel?: string;
+  directTo?: string;
+  directAccountId?: string;
+  directThreadId?: string;
+  bestEffortDeliver?: boolean;
+  signal?: AbortSignal;
+  failureReason: string;
+}): Promise<SubagentAnnounceDeliveryResult | null> {
+  if (params.signal?.aborted) {
+    return {
+      delivered: false,
+      path: "none",
+    };
+  }
+  if (params.deliverExternally) {
+    return null;
+  }
+  const { entry, canonicalKey } = loadRequesterSessionEntry(params.requesterSessionKey);
+  const sessionId =
+    typeof entry?.sessionId === "string" && entry.sessionId.trim() ? entry.sessionId.trim() : "";
+  if (!sessionId) {
+    return null;
+  }
+  try {
+    const [{ agentCommand }, { createDefaultDeps }] = await Promise.all([
+      import("../commands/agent.js"),
+      import("../cli/deps.js"),
+    ]);
+    const inputProvenance = buildAnnounceInputProvenance(params.internalEvents);
+    const localRunId = `${params.directIdempotencyKey}:local`;
+    defaultRuntime.log(
+      `[warn] Subagent announce direct handoff failed; using local requester follow-up session=${canonicalKey} reason=${params.failureReason}`,
+    );
+    void agentCommand(
+      {
+        message: params.triggerMessage,
+        sessionId,
+        sessionKey: canonicalKey,
+        deliver: false,
+        bestEffortDeliver: params.bestEffortDeliver,
+        runId: localRunId,
+        messageChannel: params.directChannel || INTERNAL_MESSAGE_CHANNEL,
+        channel: params.directChannel,
+        accountId: params.directAccountId,
+        to: params.directTo,
+        threadId: params.directThreadId,
+        internalEvents: params.internalEvents,
+        inputProvenance,
+        senderIsOwner: true,
+        abortSignal: params.signal,
+      },
+      defaultRuntime,
+      createDefaultDeps(),
+    ).catch((error) => {
+      defaultRuntime.error?.(
+        `Subagent announce local requester follow-up failed session=${canonicalKey}: ${String(error)}`,
+      );
+    });
+    return {
+      delivered: true,
+      path: "direct",
+    };
+  } catch (error) {
+    defaultRuntime.error?.(
+      `Subagent announce local requester follow-up setup failed session=${canonicalKey}: ${String(error)}`,
+    );
+    return null;
+  }
+}
+
+async function verifyAcceptedRequesterFollowUpRun(params: {
+  runId: string;
+  announceTimeoutMs: number;
+  signal?: AbortSignal;
+}): Promise<{
+  status: "ok" | "timeout" | "error";
+  error?: string;
+}> {
+  if (params.signal?.aborted) {
+    return {
+      status: "timeout",
+    };
+  }
+
+  try {
+    const wait = await callGateway<{
+      status?: unknown;
+      error?: unknown;
+    }>({
+      method: "agent.wait",
+      params: {
+        runId: params.runId,
+        timeoutMs: Math.max(
+          1,
+          Math.min(params.announceTimeoutMs, DIRECT_REQUESTER_FOLLOW_UP_VERIFY_TIMEOUT_MS),
+        ),
+      },
+      timeoutMs: params.announceTimeoutMs,
+    });
+    const status = typeof wait?.status === "string" ? wait.status.trim() : "";
+    if (status === "ok") {
+      return { status: "ok" };
+    }
+    if (status === "error") {
+      return {
+        status: "error",
+        error: typeof wait?.error === "string" ? wait.error : "requester follow-up failed",
+      };
+    }
+    return { status: "timeout" };
+  } catch (error) {
+    return {
+      status: "error",
+      error: summarizeDeliveryError(error),
+    };
+  }
 }
 
 function buildAnnounceQueueKey(sessionKey: string, origin?: DeliveryContext): string {
@@ -876,7 +1025,10 @@ async function sendSubagentAnnounceDirectly(params: {
         path: "none",
       };
     }
-    await runAnnounceDeliveryWithRetry({
+    const directAgentResult = await runAnnounceDeliveryWithRetry<{
+      status?: unknown;
+      runId?: unknown;
+    }>({
       operation: "direct announce agent call",
       signal: params.signal,
       run: async () =>
@@ -888,26 +1040,155 @@ async function sendSubagentAnnounceDirectly(params: {
             deliver: shouldDeliverExternally,
             bestEffortDeliver: params.bestEffortDeliver,
             internalEvents: params.internalEvents,
+            inputProvenance: buildAnnounceInputProvenance(params.internalEvents),
             channel: shouldDeliverExternally ? directChannel : undefined,
             accountId: shouldDeliverExternally ? directOrigin?.accountId : undefined,
             to: shouldDeliverExternally ? directTo : undefined,
             threadId: shouldDeliverExternally ? threadId : undefined,
             idempotencyKey: params.directIdempotencyKey,
           },
-          expectFinal: true,
           timeoutMs: announceTimeoutMs,
         }),
     });
+
+    const directAgentStatus =
+      typeof directAgentResult?.status === "string" ? directAgentResult.status.trim() : "";
+    const directAgentRunId =
+      typeof directAgentResult?.runId === "string" ? directAgentResult.runId.trim() : "";
+    const shouldVerifyAcceptedRequesterFollowUp =
+      params.expectsCompletionMessage &&
+      !shouldDeliverExternally &&
+      directAgentStatus === "accepted";
+
+    if (
+      directAgentStatus &&
+      directAgentStatus !== "accepted" &&
+      directAgentStatus !== "ok" &&
+      !directAgentRunId
+    ) {
+      const localFallback = await maybeStartLocalRequesterFollowUp({
+        requesterSessionKey: canonicalRequesterSessionKey,
+        triggerMessage: params.triggerMessage,
+        internalEvents: params.internalEvents,
+        directIdempotencyKey: params.directIdempotencyKey,
+        deliverExternally: shouldDeliverExternally,
+        directChannel,
+        directTo,
+        directAccountId: directOrigin?.accountId,
+        directThreadId: threadId,
+        bestEffortDeliver: params.bestEffortDeliver,
+        signal: params.signal,
+        failureReason: `unexpected agent announce status: ${directAgentStatus}`,
+      });
+      if (localFallback) {
+        return localFallback;
+      }
+      return {
+        delivered: false,
+        path: "direct",
+        error: `unexpected agent announce status: ${directAgentStatus}`,
+      };
+    }
+
+    if (shouldVerifyAcceptedRequesterFollowUp) {
+      if (!directAgentRunId) {
+        const localFallback = await maybeStartLocalRequesterFollowUp({
+          requesterSessionKey: canonicalRequesterSessionKey,
+          triggerMessage: params.triggerMessage,
+          internalEvents: params.internalEvents,
+          directIdempotencyKey: params.directIdempotencyKey,
+          deliverExternally: shouldDeliverExternally,
+          directChannel,
+          directTo,
+          directAccountId: directOrigin?.accountId,
+          directThreadId: threadId,
+          bestEffortDeliver: params.bestEffortDeliver,
+          signal: params.signal,
+          failureReason: "accepted announce follow-up missing runId",
+        });
+        if (localFallback) {
+          return localFallback;
+        }
+        return {
+          delivered: false,
+          path: "direct",
+          error: "accepted announce follow-up missing runId",
+        };
+      }
+
+      const verification = await verifyAcceptedRequesterFollowUpRun({
+        runId: directAgentRunId,
+        announceTimeoutMs,
+        signal: params.signal,
+      });
+      if (verification.status === "error") {
+        const localFallback = await maybeStartLocalRequesterFollowUp({
+          requesterSessionKey: canonicalRequesterSessionKey,
+          triggerMessage: params.triggerMessage,
+          internalEvents: params.internalEvents,
+          directIdempotencyKey: params.directIdempotencyKey,
+          deliverExternally: shouldDeliverExternally,
+          directChannel,
+          directTo,
+          directAccountId: directOrigin?.accountId,
+          directThreadId: threadId,
+          bestEffortDeliver: params.bestEffortDeliver,
+          signal: params.signal,
+          failureReason: verification.error ?? "requester follow-up failed",
+        });
+        if (localFallback) {
+          return localFallback;
+        }
+        return {
+          delivered: false,
+          path: "direct",
+          error: verification.error ?? "requester follow-up failed",
+        };
+      }
+    }
 
     return {
       delivered: true,
       path: "direct",
     };
   } catch (err) {
+    const error = summarizeDeliveryError(err);
+    const directOrigin = normalizeDeliveryContext(params.directOrigin);
+    const directChannelRaw =
+      typeof directOrigin?.channel === "string" ? directOrigin.channel.trim() : "";
+    const directChannel =
+      directChannelRaw && isDeliverableMessageChannel(directChannelRaw) ? directChannelRaw : "";
+    const directTo = typeof directOrigin?.to === "string" ? directOrigin.to.trim() : "";
+    const hasDeliverableDirectTarget =
+      !params.requesterIsSubagent && Boolean(directChannel) && Boolean(directTo);
+    const shouldDeliverExternally =
+      !params.requesterIsSubagent &&
+      (!params.expectsCompletionMessage || hasDeliverableDirectTarget);
+    const threadId =
+      directOrigin?.threadId != null && directOrigin.threadId !== ""
+        ? String(directOrigin.threadId)
+        : undefined;
+    const localFallback = await maybeStartLocalRequesterFollowUp({
+      requesterSessionKey: canonicalRequesterSessionKey,
+      triggerMessage: params.triggerMessage,
+      internalEvents: params.internalEvents,
+      directIdempotencyKey: params.directIdempotencyKey,
+      deliverExternally: shouldDeliverExternally,
+      directChannel,
+      directTo,
+      directAccountId: directOrigin?.accountId,
+      directThreadId: threadId,
+      bestEffortDeliver: params.bestEffortDeliver,
+      signal: params.signal,
+      failureReason: error,
+    });
+    if (localFallback) {
+      return localFallback;
+    }
     return {
       delivered: false,
       path: "direct",
-      error: summarizeDeliveryError(err),
+      error,
     };
   }
 }
@@ -1188,6 +1469,11 @@ export async function runSubagentAnnounceFlow(params: {
   announceType?: SubagentAnnounceType;
   expectsCompletionMessage?: boolean;
   spawnMode?: SpawnSubagentMode;
+  workerModel?: string;
+  role?: SubagentDelegationRole;
+  deliverable?: string;
+  acceptance?: string[];
+  responseFormat?: SubagentResponseFormat;
   signal?: AbortSignal;
   bestEffortDeliver?: boolean;
 }): Promise<boolean> {
@@ -1342,6 +1628,10 @@ export async function runSubagentAnnounceFlow(params: {
     const subagentName = resolveAgentIdFromSessionKey(params.childSessionKey);
     const announceSessionId = childSessionId || "unknown";
     const findings = reply || "(no output)";
+    const parsedStructuredResult =
+      params.responseFormat === "structured" ? parseStructuredSubagentResult(findings) : null;
+    const malformedStructuredResult =
+      params.responseFormat === "structured" && parsedStructuredResult === null;
     const workingSetText = getSubagentReportWorkingSetText(findings);
     let completionMessage = "";
     let triggerMessage = "";
@@ -1458,6 +1748,13 @@ export async function runSubagentAnnounceFlow(params: {
         result: findings,
         statsLine,
         replyInstruction,
+        workerModel: params.workerModel,
+        role: params.role,
+        deliverable: params.deliverable,
+        acceptanceCriteria: params.acceptance,
+        responseFormat: params.responseFormat ?? "text",
+        structuredResult: parsedStructuredResult ?? undefined,
+        malformedStructuredResult,
       },
     ];
     for (const event of internalEvents) {

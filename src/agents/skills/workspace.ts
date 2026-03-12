@@ -20,6 +20,7 @@ import {
 } from "./frontmatter.js";
 import { resolvePluginSkillDirs } from "./plugin-skills.js";
 import { serializeByKey } from "./serialize.js";
+import { applySkillAuditState } from "./trust.js";
 import type {
   ParsedSkillFrontmatter,
   SkillEligibilityContext,
@@ -332,7 +333,6 @@ function loadSkillEntries(
     workspaceDir,
     config: opts?.config,
   });
-  const mergedExtraDirs = [...extraDirs, ...pluginSkillDirs];
 
   const bundledSkills = bundledSkillsDir
     ? loadSkills({
@@ -340,13 +340,19 @@ function loadSkillEntries(
         source: "openclaw-bundled",
       })
     : [];
-  const extraSkills = mergedExtraDirs.flatMap((dir) => {
+  const extraSkills = extraDirs.flatMap((dir) => {
     const resolved = resolveUserPath(dir);
     return loadSkills({
       dir: resolved,
       source: "openclaw-extra",
     });
   });
+  const pluginSkills = pluginSkillDirs.flatMap((dir) =>
+    loadSkills({
+      dir,
+      source: "openclaw-plugin",
+    }),
+  );
   const managedSkills = loadSkills({
     dir: managedSkillsDir,
     source: "openclaw-managed",
@@ -367,8 +373,11 @@ function loadSkillEntries(
   });
 
   const merged = new Map<string, Skill>();
-  // Precedence: extra < bundled < managed < agents-skills-personal < agents-skills-project < workspace
+  // Precedence: extra/plugin < bundled < managed < agents-skills-personal < agents-skills-project < workspace
   for (const skill of extraSkills) {
+    merged.set(skill.name, skill);
+  }
+  for (const skill of pluginSkills) {
     merged.set(skill.name, skill);
   }
   for (const skill of bundledSkills) {
@@ -402,7 +411,7 @@ function loadSkillEntries(
       invocation: resolveSkillInvocationPolicy(frontmatter),
     };
   });
-  return skillEntries;
+  return applySkillAuditState(skillEntries);
 }
 
 function applySkillsPromptLimits(params: { skills: Skill[]; config?: OpenClawConfig }): {

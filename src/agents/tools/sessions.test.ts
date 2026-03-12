@@ -199,6 +199,23 @@ describe("extractAssistantText", () => {
       "Firebase downgraded us to the free Spark plan. Check whether billing should be re-enabled.",
     );
   });
+
+  it("falls back to provider reasoning_content when no assistant text exists", () => {
+    const message = {
+      role: "assistant",
+      content: [
+        {
+          type: "thinking",
+          thinking: "Here is the final answer from the provider reasoning field.",
+          thinkingSignature: "reasoning_content",
+        },
+      ],
+    };
+
+    expect(extractAssistantText(message)).toBe(
+      "Here is the final answer from the provider reasoning field.",
+    );
+  });
 });
 
 describe("resolveAnnounceTarget", () => {

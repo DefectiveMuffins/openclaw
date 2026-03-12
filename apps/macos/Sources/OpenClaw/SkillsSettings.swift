@@ -87,6 +87,9 @@ struct SkillsSettings: View {
                         onToggleEnabled: { enabled in
                             Task { await self.model.setEnabled(skillKey: skill.skillKey, enabled: enabled) }
                         },
+                        onToggleTrust: { approve in
+                            Task { await self.model.setTrusted(skillKey: skill.skillKey, approved: approve) }
+                        },
                         onInstall: { option, target in
                             Task { await self.model.install(skill: skill, option: option, target: target) }
                         },
@@ -170,6 +173,7 @@ private struct SkillRow: View {
     let isBusy: Bool
     let connectionMode: AppState.ConnectionMode
     let onToggleEnabled: (Bool) -> Void
+    let onToggleTrust: (Bool) -> Void = { _ in }
     let onInstall: (SkillInstallOption, InstallTarget) -> Void
     let onSetEnv: (String, Bool) -> Void
 
@@ -203,8 +207,21 @@ private struct SkillRow: View {
                     Text("Disabled in config")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                } else if self.skill.quarantined {
+                    Text("Quarantined until trusted")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
                 } else if !self.requirementsMet, self.shouldShowMissingSummary {
                     self.missingSummary
+                }
+
+                if let auditSummary = self.skill.auditSummary,
+                   self.skill.auditStatus != "not_applicable"
+                {
+                    Text(
+                        "Audit: \(self.skill.auditStatus) • \(auditSummary.scannedFiles) files • \(auditSummary.critical) critical • \(auditSummary.warn) warn")
+                        .font(.caption)
+                        .foregroundStyle(self.skill.auditStatus == "critical" ? .red : .secondary)
                 }
 
                 if !self.skill.configChecks.isEmpty {
@@ -320,6 +337,14 @@ private struct SkillRow: View {
 
     private var trailingActions: some View {
         VStack(alignment: .trailing, spacing: 8) {
+            if self.skill.auditStatus != "not_applicable" {
+                Button(self.skill.quarantined ? "Approve" : "Revoke Trust") {
+                    self.onToggleTrust(self.skill.quarantined)
+                }
+                .buttonStyle(.bordered)
+                .disabled(self.isBusy)
+            }
+
             if !self.installOptions.isEmpty {
                 ForEach(self.installOptions, id: \.id) { (option: SkillInstallOption) in
                     HStack(spacing: 6) {
@@ -510,7 +535,11 @@ final class SkillsSettingsModel {
                     name: skill.name,
                     installId: option.id,
                     timeoutMs: 300_000)
-                self.statusMessage = result.message
+                let quarantineSuffix =
+                    result.audit?.quarantined == true
+                    ? " Skill remains quarantined."
+                    : ""
+                self.statusMessage = "\(result.message)\(quarantineSuffix)"
             } catch {
                 self.statusMessage = error.localizedDescription
             }
@@ -546,6 +575,23 @@ final class SkillsSettingsModel {
                         env: [envKey: value])
                     self.statusMessage = "Saved \(envKey)"
                 }
+            } catch {
+                self.statusMessage = error.localizedDescription
+            }
+            await self.refresh()
+        }
+    }
+
+    func setTrusted(skillKey: String, approved: Bool) async {
+        await self.withBusy(skillKey) {
+            do {
+                let result = try await GatewayConnection.shared.skillsTrust(
+                    skillKey: skillKey,
+                    action: approved ? "approve" : "revoke")
+                self.statusMessage =
+                    approved
+                    ? "Skill approved (\(result.auditStatus))"
+                    : "Skill trust revoked (\(result.auditStatus))"
             } catch {
                 self.statusMessage = error.localizedDescription
             }

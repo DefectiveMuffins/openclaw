@@ -6,6 +6,8 @@ import {
   loadToolsCatalog,
   moveHostedRoutingProvider,
   startHostedProviderAuth,
+  updateAgentModelFallbacks,
+  updateAgentPrimaryModel,
   updateHostedRoutingMode,
   updateHostedRoutingProviderEnabled,
 } from "./agents.ts";
@@ -166,6 +168,114 @@ describe("discoverProviderModels", () => {
     expect(state.agentModelDiscoveryError).toContain("LM Studio offline");
     expect(state.agentModelDiscoveryImportedCount).toBeNull();
     expect(state.agentModelDiscoveryLoading).toBe(false);
+  });
+});
+
+describe("updateAgentPrimaryModel", () => {
+  it("writes the default agent model to agents.defaults.model when main has no explicit list entry", () => {
+    const { state } = createState();
+    state.configForm = {
+      agents: {
+        defaults: {
+          model: {
+            primary: "local/qwen/qwen3.5-35b-a3b",
+            fallbacks: ["openai/gpt-4.1"],
+          },
+        },
+      },
+    };
+
+    updateAgentPrimaryModel({
+      state,
+      configValue: state.configForm,
+      agentId: "main",
+      defaultAgentId: "main",
+      modelId: "local/qwen3.5-35b-a3b-heretic-v2",
+    });
+
+    expect(state.configForm).toMatchObject({
+      agents: {
+        defaults: {
+          model: {
+            primary: "local/qwen3.5-35b-a3b-heretic-v2",
+            fallbacks: ["openai/gpt-4.1"],
+          },
+        },
+      },
+    });
+    expect(state.configFormDirty).toBe(true);
+  });
+
+  it("keeps updating non-default agent model entries in agents.list", () => {
+    const { state } = createState();
+    state.configForm = {
+      agents: {
+        list: [
+          {
+            id: "coding",
+            model: {
+              primary: "local/qwen3-coder-next",
+              fallbacks: ["openai/gpt-4.1"],
+            },
+          },
+        ],
+      },
+    };
+
+    updateAgentPrimaryModel({
+      state,
+      configValue: state.configForm,
+      agentId: "coding",
+      defaultAgentId: "main",
+      modelId: "local/qwen3-coder-30b-a3b-it-heretic-i1",
+    });
+
+    expect(state.configForm).toMatchObject({
+      agents: {
+        list: [
+          {
+            id: "coding",
+            model: {
+              primary: "local/qwen3-coder-30b-a3b-it-heretic-i1",
+              fallbacks: ["openai/gpt-4.1"],
+            },
+          },
+        ],
+      },
+    });
+  });
+});
+
+describe("updateAgentModelFallbacks", () => {
+  it("writes default-agent fallbacks to agents.defaults.model", () => {
+    const { state } = createState();
+    state.configForm = {
+      agents: {
+        defaults: {
+          model: "local/qwen/qwen3.5-35b-a3b",
+        },
+      },
+    };
+
+    updateAgentModelFallbacks({
+      state,
+      configValue: state.configForm,
+      agentId: "main",
+      defaultAgentId: "main",
+      fallbacks: ["local/qwen3.5-9b", "openai/gpt-4.1"],
+    });
+
+    expect(state.configForm).toMatchObject({
+      agents: {
+        defaults: {
+          model: {
+            primary: "local/qwen/qwen3.5-35b-a3b",
+            fallbacks: ["local/qwen3.5-9b", "openai/gpt-4.1"],
+          },
+        },
+      },
+    });
+    expect(state.configFormDirty).toBe(true);
   });
 });
 
@@ -382,4 +492,3 @@ describe("startHostedProviderAuth", () => {
     expect(state.hostedProviderAuthProviderId).toBe("google");
   });
 });
-

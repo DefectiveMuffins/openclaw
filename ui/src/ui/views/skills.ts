@@ -23,6 +23,7 @@ export type SkillsProps = {
   onEdit: (skillKey: string, value: string) => void;
   onSaveKey: (skillKey: string) => void;
   onInstall: (skillKey: string, name: string, installId: string) => void;
+  onTrust: (skillKey: string, action: "approve" | "revoke") => void;
 };
 
 export function renderSkills(props: SkillsProps) {
@@ -119,19 +120,34 @@ function renderSkill(skill: SkillStatusEntry, props: SkillsProps) {
         ${
           missing.length > 0
             ? html`
-              <div class="muted" style="margin-top: 6px;">
-                Missing: ${missing.join(", ")}
-              </div>
+              <div class="muted" style="margin-top: 6px;">Missing: ${missing.join(", ")}</div>
             `
             : nothing
         }
         ${
           reasons.length > 0
             ? html`
-              <div class="muted" style="margin-top: 6px;">
-                Reason: ${reasons.join(", ")}
-              </div>
+              <div class="muted" style="margin-top: 6px;">Reason: ${reasons.join(", ")}</div>
             `
+            : nothing
+        }
+        ${
+          skill.auditStatus !== "not_applicable" && skill.auditSummary
+            ? html`
+                <div
+                  class="muted"
+                  style="margin-top: 6px; color: ${
+                    skill.auditStatus === "critical"
+                      ? "var(--danger-color, #d14343)"
+                      : skill.auditStatus === "warn"
+                        ? "var(--warning-color, #c07a00)"
+                        : "inherit"
+                  };"
+                >
+                  Audit: ${skill.auditStatus} · ${skill.auditSummary.scannedFiles} files ·
+                  ${skill.auditSummary.critical} critical · ${skill.auditSummary.warn} warn
+                </div>
+              `
             : nothing
         }
       </div>
@@ -144,6 +160,20 @@ function renderSkill(skill: SkillStatusEntry, props: SkillsProps) {
           >
             ${skill.disabled ? "Enable" : "Disable"}
           </button>
+          ${
+            skill.auditStatus !== "not_applicable"
+              ? html`
+                  <button
+                    class="btn"
+                    ?disabled=${busy}
+                    @click=${() =>
+                      props.onTrust(skill.skillKey, skill.quarantined ? "approve" : "revoke")}
+                  >
+                    ${skill.quarantined ? "Approve" : "Revoke trust"}
+                  </button>
+                `
+              : nothing
+          }
           ${
             canInstall
               ? html`<button

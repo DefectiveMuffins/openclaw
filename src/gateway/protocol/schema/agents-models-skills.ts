@@ -254,6 +254,8 @@ export const SkillsStatusParamsSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const SkillsTrustActionSchema = Type.Union([Type.Literal("approve"), Type.Literal("revoke")]);
+
 export const SkillsBinsParamsSchema = Type.Object({}, { additionalProperties: false });
 
 export const SkillsBinsResultSchema = Type.Object(
@@ -268,6 +270,23 @@ export const SkillsInstallParamsSchema = Type.Object(
     name: NonEmptyString,
     installId: NonEmptyString,
     timeoutMs: Type.Optional(Type.Integer({ minimum: 1000 })),
+  },
+  { additionalProperties: false },
+);
+
+export const SkillsAuditParamsSchema = Type.Object(
+  {
+    agentId: Type.Optional(NonEmptyString),
+    skillKey: Type.Optional(NonEmptyString),
+  },
+  { additionalProperties: false },
+);
+
+export const SkillsTrustParamsSchema = Type.Object(
+  {
+    agentId: Type.Optional(NonEmptyString),
+    skillKey: NonEmptyString,
+    action: SkillsTrustActionSchema,
   },
   { additionalProperties: false },
 );

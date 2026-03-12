@@ -218,7 +218,7 @@ export const agentHandlers: GatewayRequestHandlers = {
     let resolvedGroupSpace: string | undefined = groupSpaceRaw || undefined;
     let spawnedByValue =
       typeof request.spawnedBy === "string" ? request.spawnedBy.trim() : undefined;
-    const inputProvenance = normalizeInputProvenance(request.inputProvenance);
+    let inputProvenance = normalizeInputProvenance(request.inputProvenance);
     const cached = context.dedupe.get(`agent:${idem}`);
     if (cached) {
       respond(cached.ok, cached.payload, cached.error, {
@@ -353,6 +353,7 @@ export const agentHandlers: GatewayRequestHandlers = {
         // reset first, then run a fresh-session greeting prompt in-place.
         message = BARE_SESSION_RESET_PROMPT;
         skipTimestampInjection = true;
+        inputProvenance = { kind: "internal_system" };
       }
     }
 
@@ -459,11 +460,14 @@ export const agentHandlers: GatewayRequestHandlers = {
         });
         sessionEntry = persisted;
       }
-      if (canonicalSessionKey === mainSessionKey || canonicalSessionKey === "global") {
+      const publicSessionKey = requestedSessionKeyRaw ?? canonicalSessionKey;
+      if (publicSessionKey) {
         context.addChatRun(idem, {
-          sessionKey: canonicalSessionKey,
+          sessionKey: publicSessionKey,
           clientRunId: idem,
         });
+      }
+      if (canonicalSessionKey === mainSessionKey || canonicalSessionKey === "global") {
         if (requestedBestEffortDeliver === undefined) {
           bestEffortDeliver = true;
         }

@@ -87,7 +87,7 @@ You can enforce a strict manager/worker turn at depth 0 via `agents.defaults.sub
       subagents: {
         delegation: {
           mode: "hard", // off | soft | hard
-          scope: "all", // all | action_only
+          scope: "action_only", // default; all | action_only
         },
       },
     },
@@ -97,21 +97,25 @@ You can enforce a strict manager/worker turn at depth 0 via `agents.defaults.sub
 
 Behavior in `mode: "hard"` (top-level requester sessions only):
 
-- The parent becomes a strict **manager** and is forced onto the `manager` tool profile (planning/context/session tools only: `read`, `memory_search`, `memory_get`, `agents_list`, `sessions_list`, `sessions_history`, `sessions_spawn`, `subagents`, `session_status`).
+- The parent becomes a strict **manager** and is forced onto the `manager` tool profile (planning/context/session tools only: `read`, `memory_search`, `memory_get`, `agents_list`, `models_list`, `sessions_list`, `sessions_history`, `sessions_spawn`, `subagents`, `session_status`, `subagent_review`).
 - Direct execution/mutation/messaging tools are hidden at the top level (`write`, `edit`, `apply_patch`, `exec`, `process`, `browser`, `canvas`, `sessions_send`, `message`).
-- Runtime enforcement uses a deterministic flow: `planning -> waiting_for_workers -> synthesis`.
-- The parent only unblocks synthesis after at least one typed `task_completion` event from a child spawned in the current turn.
+- Runtime enforcement uses a deterministic flow: `planning -> waiting_for_workers -> review -> synthesis`.
+- Planning requires at least one `sessions_spawn` with an explicit `model` chosen from `models_list`.
+- The parent only unblocks review after at least one typed `task_completion` event from a child spawned in the current turn.
 - `task_completion` with `ok`, `error`, or `timeout` all satisfy the join so the parent can report cleanly instead of hanging.
-- Join gating is driven by typed internal events from announce/runtime plumbing, not freeform announce text parsing.
+- Every completed worker result must be explicitly reviewed with `subagent_review` before synthesis or further corrective spawns.
+- Rejections use corrective actions: first corrective retry may use the same model, second corrective retry must switch models, and corrective retries are capped at 2.
+- After retry budget is exhausted, managers should record `nextAction=final_failure` and return a failure-oriented final answer.
+- Join/review gating is driven by typed internal events from announce/runtime plumbing, not freeform announce text parsing.
 
-`mode: "soft"` keeps the existing retry-style enforcement. `mode: "off"` disables forced delegation.
+`mode: "soft"` keeps the existing retry-style enforcement. `mode: "off"` disables forced delegation. When `scope` is omitted, OpenClaw defaults to `action_only`. Internal startup/reset prompts such as the bare `/new` and `/reset` greeting prompt are treated as `internal_system` turns and are exempt from forced delegation.
 
 Tool params:
 
 - `task` (required)
 - `label?` (optional)
 - `agentId?` (optional; spawn under another agent id if allowed)
-- `model?` (optional; overrides the sub-agent model; invalid values are skipped and the sub-agent runs on the default model with a warning in the tool result)
+- `model?` (optional in general; required in top-level hard delegation mode, where it must resolve to an allowed/discovered model from `models_list`)
 - `thinking?` (optional; overrides thinking level for the sub-agent run)
 - `runTimeoutSeconds?` (defaults to `agents.defaults.subagents.runTimeoutSeconds` when set, otherwise `0`; when set, the sub-agent run is aborted after N seconds)
 - `thread?` (default `false`; when `true`, requests channel thread binding for this sub-agent session)

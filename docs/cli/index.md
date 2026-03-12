@@ -466,13 +466,16 @@ openclaw status --deep
 
 ### `skills`
 
-List and inspect available skills plus readiness info.
+List and inspect available skills, audit them, and approve trust for quarantined third-party skills.
 
 Subcommands:
 
 - `skills list`: list skills (default when no subcommand).
 - `skills info <name>`: show details for one skill.
 - `skills check`: summary of ready vs missing requirements.
+- `skills audit [name]`: rescan one skill or all visible skills for audit findings.
+- `skills trust approve <name>`: approve the current fingerprint for a quarantined skill.
+- `skills trust revoke <name>`: revoke trust for the current fingerprint.
 
 Options:
 

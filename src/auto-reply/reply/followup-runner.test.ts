@@ -513,4 +513,34 @@ describe("createFollowupRunner agentDir forwarding", () => {
     const call = runEmbeddedPiAgentMock.mock.calls.at(-1)?.[0] as { agentDir?: string };
     expect(call?.agentDir).toBe(agentDir);
   });
+
+  it("passes summaryLine as delegationPrompt for queued runs", async () => {
+    runEmbeddedPiAgentMock.mockClear();
+    runEmbeddedPiAgentMock.mockResolvedValueOnce({
+      payloads: [{ text: "hello world!" }],
+      messagingToolSentTexts: ["different message"],
+      meta: {},
+    });
+    const onBlockReply = vi.fn(async () => {});
+    const runner = createFollowupRunner({
+      opts: { onBlockReply },
+      typing: createMockTypingController(),
+      typingMode: "instant",
+      defaultModel: "anthropic/claude-opus-4-5",
+    });
+    const queued = createQueuedRun({
+      prompt: "[Thread history - for context]\nRun tests and summarize failures\n\nhi there",
+      summaryLine: "hi there",
+    });
+
+    await runner(queued);
+
+    expect(runEmbeddedPiAgentMock).toHaveBeenCalledTimes(1);
+    expect(runEmbeddedPiAgentMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: "[Thread history - for context]\nRun tests and summarize failures\n\nhi there",
+        delegationPrompt: "hi there",
+      }),
+    );
+  });
 });

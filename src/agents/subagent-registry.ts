@@ -37,6 +37,7 @@ import {
   findRunIdsByChildSessionKeyFromRuns,
   listDescendantRunsForRequesterFromRuns,
   listRunsForRequesterFromRuns,
+  resolveLatestRunForChildSessionFromRuns,
   resolveRequesterForChildSessionFromRuns,
 } from "./subagent-registry-queries.js";
 import {
@@ -407,6 +408,11 @@ function startSubagentAnnounceCleanupFlow(runId: string, entry: SubagentRunRecor
     label: entry.label,
     outcome: entry.outcome,
     spawnMode: entry.spawnMode,
+    workerModel: entry.model,
+    role: entry.role,
+    deliverable: entry.deliverable,
+    acceptance: entry.acceptance,
+    responseFormat: entry.responseFormat,
     expectsCompletionMessage: entry.expectsCompletionMessage,
   })
     .then((didAnnounce) => {
@@ -901,7 +907,7 @@ export function clearSubagentRunSteerRestart(runId: string) {
   return true;
 }
 
-export function replaceSubagentRunAfterSteer(params: {
+function replaceSubagentRunRecord(params: {
   previousRunId: string;
   nextRunId: string;
   fallback?: SubagentRunRecord;
@@ -960,6 +966,24 @@ export function replaceSubagentRunAfterSteer(params: {
   }
   void waitForSubagentCompletion(nextRunId, waitTimeoutMs);
   return true;
+}
+
+export function replaceSubagentRunAfterSteer(params: {
+  previousRunId: string;
+  nextRunId: string;
+  fallback?: SubagentRunRecord;
+  runTimeoutSeconds?: number;
+}) {
+  return replaceSubagentRunRecord(params);
+}
+
+export function replaceSubagentRunForFollowup(params: {
+  previousRunId: string;
+  nextRunId: string;
+  fallback?: SubagentRunRecord;
+  runTimeoutSeconds?: number;
+}) {
+  return replaceSubagentRunRecord(params);
 }
 
 export function registerSubagentRun(params: {
@@ -1146,6 +1170,15 @@ export function resolveRequesterForChildSession(childSessionKey: string): {
     requesterSessionKey: resolved.requesterSessionKey,
     requesterOrigin: normalizeDeliveryContext(resolved.requesterOrigin),
   };
+}
+
+export function resolveLatestSubagentRunForChildSession(
+  childSessionKey: string,
+): SubagentRunRecord | null {
+  return resolveLatestRunForChildSessionFromRuns(
+    getSubagentRunsSnapshotForRead(subagentRuns),
+    childSessionKey,
+  );
 }
 
 export function isSubagentSessionRunActive(childSessionKey: string): boolean {

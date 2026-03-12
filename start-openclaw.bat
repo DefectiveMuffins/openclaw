@@ -7,8 +7,12 @@ set "UI_BUILD_FAILED=0"
 set "CONTROL_UI_DISABLED=0"
 set "CONTROL_UI_ENABLED_VALUE="
 set "SKIP_BUILD=0"
-set "STATE_DIR=%PROJECT_DIR%.openclaw-state"
-set "LOCAL_CONFIG=%STATE_DIR%\openclaw.windows.json"
+set "USE_LOCAL_STATE=0"
+set "USER_STATE_DIR=%USERPROFILE%\.openclaw"
+set "PROJECT_STATE_DIR=%PROJECT_DIR%.openclaw-state"
+set "PROJECT_CONFIG=%PROJECT_STATE_DIR%\openclaw.windows.json"
+set "STATE_DIR="
+set "CONFIG_PATH="
 set "USER_CONFIG=%USERPROFILE%\.openclaw\openclaw.json"
 set "WSL_UI_DIR=%PROJECT_DIR%..\\openclaw-wsl\\dist\\control-ui"
 set "GATEWAY_TOKEN="
@@ -62,13 +66,43 @@ if errorlevel 1 (
   )
 )
 
+if defined OPENCLAW_STATE_DIR (
+  set "STATE_DIR=%OPENCLAW_STATE_DIR%"
+) else (
+  set "STATE_DIR=%USER_STATE_DIR%"
+  if /I "%OPENCLAW_USE_LOCAL_STATE%"=="1" (
+    set "USE_LOCAL_STATE=1"
+    set "STATE_DIR=%PROJECT_STATE_DIR%"
+  )
+)
+
+if defined OPENCLAW_CONFIG_PATH (
+  set "CONFIG_PATH=%OPENCLAW_CONFIG_PATH%"
+) else (
+  if "%USE_LOCAL_STATE%"=="1" (
+    set "CONFIG_PATH=%PROJECT_CONFIG%"
+  ) else (
+    set "CONFIG_PATH=%USER_CONFIG%"
+  )
+)
+
 if not exist "%STATE_DIR%" mkdir "%STATE_DIR%" >nul 2>&1
 
-if not exist "%LOCAL_CONFIG%" (
-  if exist "%USER_CONFIG%" (
-    copy /Y "%USER_CONFIG%" "%LOCAL_CONFIG%" >nul
-  ) else (
-    echo Missing %LOCAL_CONFIG%
+if "%USE_LOCAL_STATE%"=="1" (
+  if not exist "%CONFIG_PATH%" (
+    if exist "%USER_CONFIG%" (
+      copy /Y "%USER_CONFIG%" "%CONFIG_PATH%" >nul
+    ) else (
+      echo Missing %CONFIG_PATH%
+      echo Run setup-openclaw.bat first.
+      popd
+      pause
+      exit /b 1
+    )
+  )
+) else (
+  if not exist "%CONFIG_PATH%" (
+    echo Missing %CONFIG_PATH%
     echo Run setup-openclaw.bat first.
     popd
     pause
@@ -77,7 +111,7 @@ if not exist "%LOCAL_CONFIG%" (
 )
 
 set "OPENCLAW_STATE_DIR=%STATE_DIR%"
-set "OPENCLAW_CONFIG_PATH=%LOCAL_CONFIG%"
+set "OPENCLAW_CONFIG_PATH=%CONFIG_PATH%"
 
 if /I "%OPENCLAW_SKIP_BUILD%"=="1" set "SKIP_BUILD=1"
 
@@ -104,14 +138,14 @@ if "%SKIP_BUILD%"=="0" (
 
 if exist "scripts\sync-local-models.ps1" (
   echo Syncing local provider models from LM Studio...
-  powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\sync-local-models.ps1" -ConfigPath "%LOCAL_CONFIG%" -ProviderId "local" -QwenOnly -UpdateAgentModels
+  powershell -NoProfile -ExecutionPolicy Bypass -File "scripts\sync-local-models.ps1" -ConfigPath "%CONFIG_PATH%" -StateDir "%STATE_DIR%" -ProviderId "local" -QwenOnly -UpdateAgentModels
   if errorlevel 1 (
     echo Warning: model sync failed. Continuing with existing model config.
     echo.
   )
 )
 
-for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "$cfg='%LOCAL_CONFIG%'; if (Test-Path $cfg) { $j=Get-Content -Raw $cfg | ConvertFrom-Json; $t=$j.gateway.auth.token; if ($t) { $t } }"`) do set "GATEWAY_TOKEN=%%A"
+for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "$cfg='%CONFIG_PATH%'; if (Test-Path $cfg) { $j=Get-Content -Raw $cfg | ConvertFrom-Json; $t=$j.gateway.auth.token; if ($t) { $t } }"`) do set "GATEWAY_TOKEN=%%A"
 
 for /f "usebackq delims=" %%A in (`node dist\index.js config get gateway.controlUi.enabled 2^>nul`) do set "CONTROL_UI_ENABLED_VALUE=%%A"
 if /I "%CONTROL_UI_ENABLED_VALUE%"=="false" set "CONTROL_UI_DISABLED=1"
@@ -142,23 +176,35 @@ if "%CONTROL_UI_DISABLED%"=="0" if not exist "dist\control-ui\index.html" (
 )
 
 echo Starting OpenClaw gateway on port %GATEWAY_PORT%...
+echo Using state dir: %STATE_DIR%
+echo Using config: %CONFIG_PATH%
+if "%USE_LOCAL_STATE%"=="1" (
+  echo Using repo-local isolated state because OPENCLAW_USE_LOCAL_STATE=1.
+)
 echo Dashboard: http://127.0.0.1:%GATEWAY_PORT%/
 if defined GATEWAY_TOKEN echo Dashboard (tokenized): http://127.0.0.1:%GATEWAY_PORT%/#token=%GATEWAY_TOKEN%
 echo Press Ctrl+C to stop.
 echo.
 
+call :stop_existing_gateway
+if errorlevel 1 (
+  popd
+  pause
+  exit /b 1
+)
+
 if "%UI_BUILD_FAILED%"=="1" (
   echo Control UI is disabled in config for this run.
-  echo To re-enable later, set gateway.controlUi.enabled=true in %LOCAL_CONFIG%
+  echo To re-enable later, set gateway.controlUi.enabled=true in %CONFIG_PATH%
   echo.
 )
 
 if "%UI_BUILD_FAILED%"=="0" if "%CONTROL_UI_DISABLED%"=="1" (
-  echo Control UI is disabled in %LOCAL_CONFIG%.
+  echo Control UI is disabled in %CONFIG_PATH%.
   echo.
 )
 
-node dist\index.js gateway --port %GATEWAY_PORT% --verbose
+node dist\index.js gateway --port %GATEWAY_PORT% --verbose --allow-unconfigured
 set "EXIT_CODE=%ERRORLEVEL%"
 
 if not "%EXIT_CODE%"=="0" (
@@ -180,6 +226,28 @@ exit /b %ERRORLEVEL%
 
 :preflight_cli
 node dist\index.js --version >nul 2>&1
+exit /b %ERRORLEVEL%
+
+:stop_existing_gateway
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$port=[int]'%GATEWAY_PORT%';" ^
+  "$listeners=@(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique);" ^
+  "if (-not $listeners) { exit 0 }" ^
+  "$blocked=$false;" ^
+  "foreach ($pid in $listeners) {" ^
+  "  $proc=Get-CimInstance Win32_Process -Filter \"ProcessId = $pid\" -ErrorAction SilentlyContinue;" ^
+  "  if (-not $proc) { continue }" ^
+  "  $cmd=$proc.CommandLine;" ^
+  "  $looksLikeOpenClaw=($cmd -match '(^|\\s)dist\\\\index\\.js\\s+gateway(\\s|$)') -or ($cmd -match '(^|\\s)openclaw(?:\\.cmd|\\.exe)?\\s+gateway(\\s|$)');" ^
+  "  if ($looksLikeOpenClaw) {" ^
+  "    Write-Host ('Stopping existing OpenClaw gateway PID {0} on port {1}.' -f $pid, $port);" ^
+  "    Stop-Process -Id $pid -Force -ErrorAction Stop;" ^
+  "    continue" ^
+  "  }" ^
+  "  Write-Host ('Port {0} is already in use by PID {1}. Command: {2}' -f $port, $pid, $cmd);" ^
+  "  $blocked=$true;" ^
+  "}" ^
+  "if ($blocked) { exit 1 }"
 exit /b %ERRORLEVEL%
 
 

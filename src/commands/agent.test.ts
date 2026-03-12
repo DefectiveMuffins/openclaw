@@ -418,6 +418,113 @@ describe("agentCommand", () => {
     });
   });
 
+  it("emits a synthetic assistant event when embedded results only return payload text", async () => {
+    await withTempHome(async (home) => {
+      const store = path.join(home, "sessions.json");
+      mockConfig(home, store);
+
+      const events: Array<{
+        stream: string;
+        text?: string;
+        phase?: string;
+        synthesizedFinal?: boolean;
+      }> = [];
+      const stop = onAgentEvent((evt) => {
+        if (evt.stream !== "assistant" && evt.stream !== "lifecycle") {
+          return;
+        }
+        events.push({
+          stream: evt.stream,
+          text: typeof evt.data?.text === "string" ? evt.data.text : undefined,
+          phase: typeof evt.data?.phase === "string" ? evt.data.phase : undefined,
+          synthesizedFinal: evt.data?.synthesizedFinal === true,
+        });
+      });
+
+      vi.mocked(runEmbeddedPiAgent).mockResolvedValueOnce({
+        payloads: [{ text: "payload only" }],
+        meta: { agentMeta: { provider: "p", model: "m" } },
+      } as never);
+
+      await agentCommand({ message: "hi", to: "+1555" }, runtime);
+      stop();
+
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          stream: "assistant",
+          text: "payload only",
+          synthesizedFinal: true,
+        }),
+      );
+      expect(events).toContainEqual(expect.objectContaining({ stream: "lifecycle", phase: "end" }));
+    });
+  });
+
+  it("emits a synthetic completion after recovering payload text from an already-ended embedded run", async () => {
+    await withTempHome(async (home) => {
+      const store = path.join(home, "sessions.json");
+      mockConfig(home, store);
+
+      const events: Array<{
+        stream: string;
+        text?: string;
+        phase?: string;
+        synthesizedFinal?: boolean;
+      }> = [];
+      const stop = onAgentEvent((evt) => {
+        if (evt.stream !== "assistant" && evt.stream !== "lifecycle") {
+          return;
+        }
+        events.push({
+          stream: evt.stream,
+          text: typeof evt.data?.text === "string" ? evt.data.text : undefined,
+          phase: typeof evt.data?.phase === "string" ? evt.data.phase : undefined,
+          synthesizedFinal: evt.data?.synthesizedFinal === true,
+        });
+      });
+
+      vi.mocked(runEmbeddedPiAgent).mockImplementationOnce(async (params) => {
+        const runId = (params as { runId?: string } | undefined)?.runId ?? "run";
+        const lifecycleData = { phase: "end" };
+        (
+          params as {
+            onAgentEvent?: (evt: { stream: string; data: Record<string, unknown> }) => void;
+          }
+        ).onAgentEvent?.({ stream: "lifecycle", data: lifecycleData });
+        emitAgentEvent({ runId, stream: "lifecycle", data: lifecycleData });
+        return {
+          payloads: [{ text: "recovered final" }],
+          meta: { agentMeta: { provider: "p", model: "m" } },
+        } as never;
+      });
+
+      await agentCommand({ message: "hi", to: "+1555" }, runtime);
+      stop();
+
+      const nativeLifecycleIndex = events.findIndex(
+        (evt) =>
+          evt.stream === "lifecycle" && evt.phase === "end" && evt.synthesizedFinal !== true,
+      );
+      const syntheticAssistantIndex = events.findIndex(
+        (evt) =>
+          evt.stream === "assistant" &&
+          evt.text === "recovered final" &&
+          evt.synthesizedFinal === true,
+      );
+      const syntheticLifecycleIndex = events.findIndex(
+        (evt, index) =>
+          index > syntheticAssistantIndex &&
+          evt.stream === "lifecycle" &&
+          evt.phase === "end" &&
+          evt.synthesizedFinal === true,
+      );
+
+      expect(nativeLifecycleIndex).toBeGreaterThanOrEqual(0);
+      expect(syntheticAssistantIndex).toBeGreaterThan(nativeLifecycleIndex);
+      expect(syntheticLifecycleIndex).toBeGreaterThan(syntheticAssistantIndex);
+    });
+  });
+
   it("uses provider/model from agents.defaults.model.primary", async () => {
     await withTempHome(async (home) => {
       const store = path.join(home, "sessions.json");

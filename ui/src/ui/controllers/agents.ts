@@ -10,7 +10,7 @@ import type {
   ModelsHostedProvidersResult,
   ToolsCatalogResult,
 } from "../types.ts";
-import { updateConfigFormValue, type ConfigFormState } from "./config.ts";
+import { removeConfigFormValue, updateConfigFormValue, type ConfigFormState } from "./config.ts";
 
 const LMSTUDIO_PROVIDER_ID = "lmstudio";
 const LMSTUDIO_DEFAULT_BASE_URL = "http://127.0.0.1:1234/v1";
@@ -73,6 +73,137 @@ export type AgentsState = {
   hostedProviderAuthStep: GatewayWizardStep | null;
   hostedProviderAuthValue: unknown;
 };
+
+type ConfigObject = Record<string, unknown>;
+
+function resolveAgentModelTarget(params: {
+  configValue: ConfigObject;
+  agentId: string;
+  defaultAgentId?: string | null;
+}): { basePath: Array<string | number>; existing: unknown } | null {
+  if (params.defaultAgentId && params.agentId === params.defaultAgentId) {
+    const existing = (params.configValue.agents as { defaults?: { model?: unknown } } | undefined)
+      ?.defaults?.model;
+    return {
+      basePath: ["agents", "defaults", "model"],
+      existing,
+    };
+  }
+
+  const list = (params.configValue.agents as { list?: unknown[] } | undefined)?.list;
+  if (!Array.isArray(list)) {
+    return null;
+  }
+  const index = list.findIndex(
+    (entry) =>
+      entry &&
+      typeof entry === "object" &&
+      "id" in entry &&
+      (entry as { id?: string }).id === params.agentId,
+  );
+  if (index < 0) {
+    return null;
+  }
+  const existing = (list[index] as { model?: unknown } | undefined)?.model;
+  return {
+    basePath: ["agents", "list", index, "model"],
+    existing,
+  };
+}
+
+function resolvePrimaryModelValue(existing: unknown): string | null {
+  if (typeof existing === "string") {
+    const trimmed = existing.trim();
+    return trimmed || null;
+  }
+  if (existing && typeof existing === "object" && !Array.isArray(existing)) {
+    const primary = (existing as { primary?: unknown }).primary;
+    if (typeof primary === "string") {
+      const trimmed = primary.trim();
+      return trimmed || null;
+    }
+  }
+  return null;
+}
+
+export function updateAgentPrimaryModel(params: {
+  state: ConfigFormState;
+  configValue: ConfigObject | null | undefined;
+  agentId: string;
+  defaultAgentId?: string | null;
+  modelId: string | null;
+}) {
+  if (!params.configValue) {
+    return;
+  }
+  const target = resolveAgentModelTarget({
+    configValue: params.configValue,
+    agentId: params.agentId,
+    defaultAgentId: params.defaultAgentId,
+  });
+  if (!target) {
+    return;
+  }
+
+  if (!params.modelId) {
+    const fallbacks =
+      target.existing && typeof target.existing === "object" && !Array.isArray(target.existing)
+        ? (target.existing as { fallbacks?: unknown }).fallbacks
+        : undefined;
+    if (Array.isArray(fallbacks) && fallbacks.length > 0) {
+      updateConfigFormValue(params.state, target.basePath, { fallbacks });
+    } else {
+      removeConfigFormValue(params.state, target.basePath);
+    }
+    return;
+  }
+
+  if (target.existing && typeof target.existing === "object" && !Array.isArray(target.existing)) {
+    const fallbacks = (target.existing as { fallbacks?: unknown }).fallbacks;
+    const next = {
+      primary: params.modelId,
+      ...(Array.isArray(fallbacks) ? { fallbacks } : {}),
+    };
+    updateConfigFormValue(params.state, target.basePath, next);
+    return;
+  }
+
+  updateConfigFormValue(params.state, target.basePath, params.modelId);
+}
+
+export function updateAgentModelFallbacks(params: {
+  state: ConfigFormState;
+  configValue: ConfigObject | null | undefined;
+  agentId: string;
+  defaultAgentId?: string | null;
+  fallbacks: string[];
+}) {
+  if (!params.configValue) {
+    return;
+  }
+  const target = resolveAgentModelTarget({
+    configValue: params.configValue,
+    agentId: params.agentId,
+    defaultAgentId: params.defaultAgentId,
+  });
+  if (!target) {
+    return;
+  }
+
+  const normalized = params.fallbacks.map((name) => name.trim()).filter(Boolean);
+  const primary = resolvePrimaryModelValue(target.existing);
+  if (normalized.length === 0) {
+    if (primary) {
+      updateConfigFormValue(params.state, target.basePath, primary);
+    } else {
+      removeConfigFormValue(params.state, target.basePath);
+    }
+    return;
+  }
+
+  const next = primary ? { primary, fallbacks: normalized } : { fallbacks: normalized };
+  updateConfigFormValue(params.state, target.basePath, next);
+}
 
 function normalizeGatewayModelChoices(models: unknown[]): GatewayModelChoice[] {
   const seen = new Set<string>();

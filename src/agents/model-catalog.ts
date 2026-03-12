@@ -7,6 +7,13 @@ const log = createSubsystemLogger("model-catalog");
 
 export type ModelInputType = "text" | "image" | "document";
 
+export type ModelCostMetadata = {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+};
+
 export type ModelCatalogEntry = {
   id: string;
   name: string;
@@ -14,6 +21,7 @@ export type ModelCatalogEntry = {
   contextWindow?: number;
   reasoning?: boolean;
   input?: ModelInputType[];
+  cost?: ModelCostMetadata;
 };
 
 type DiscoveredModel = {
@@ -23,6 +31,7 @@ type DiscoveredModel = {
   contextWindow?: number;
   reasoning?: boolean;
   input?: ModelInputType[];
+  cost?: ModelCostMetadata;
 };
 
 type PiSdkModule = typeof import("./pi-model-discovery.js");
@@ -72,6 +81,36 @@ function normalizeConfiguredModelInput(input: unknown): ModelInputType[] | undef
   return normalized.length > 0 ? normalized : undefined;
 }
 
+function normalizeModelCostMetadata(value: unknown): ModelCostMetadata | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const raw = value as {
+    input?: unknown;
+    output?: unknown;
+    cacheRead?: unknown;
+    cacheWrite?: unknown;
+  };
+  const input = typeof raw.input === "number" && Number.isFinite(raw.input) ? raw.input : undefined;
+  const output =
+    typeof raw.output === "number" && Number.isFinite(raw.output) ? raw.output : undefined;
+  const cacheRead =
+    typeof raw.cacheRead === "number" && Number.isFinite(raw.cacheRead) ? raw.cacheRead : undefined;
+  const cacheWrite =
+    typeof raw.cacheWrite === "number" && Number.isFinite(raw.cacheWrite)
+      ? raw.cacheWrite
+      : undefined;
+  if (
+    input === undefined ||
+    output === undefined ||
+    cacheRead === undefined ||
+    cacheWrite === undefined
+  ) {
+    return undefined;
+  }
+  return { input, output, cacheRead, cacheWrite };
+}
+
 function readConfiguredOptInProviderModels(config: OpenClawConfig): ModelCatalogEntry[] {
   const providers = config.models?.providers;
   if (!providers || typeof providers !== "object") {
@@ -113,7 +152,8 @@ function readConfiguredOptInProviderModels(config: OpenClawConfig): ModelCatalog
       const reasoningRaw = (configuredModel as { reasoning?: unknown }).reasoning;
       const reasoning = typeof reasoningRaw === "boolean" ? reasoningRaw : undefined;
       const input = normalizeConfiguredModelInput((configuredModel as { input?: unknown }).input);
-      out.push({ id, name, provider, contextWindow, reasoning, input });
+      const cost = normalizeModelCostMetadata((configuredModel as { cost?: unknown }).cost);
+      out.push({ id, name, provider, contextWindow, reasoning, input, cost });
     }
   }
 
@@ -215,7 +255,8 @@ export async function loadModelCatalog(params?: {
             : undefined;
         const reasoning = typeof entry?.reasoning === "boolean" ? entry.reasoning : undefined;
         const input = Array.isArray(entry?.input) ? entry.input : undefined;
-        models.push({ id, name, provider, contextWindow, reasoning, input });
+        const cost = normalizeModelCostMetadata(entry?.cost);
+        models.push({ id, name, provider, contextWindow, reasoning, input, cost });
       }
       mergeConfiguredOptInProviderModels({ config: cfg, models });
       applyOpenAICodexSparkFallback(models);

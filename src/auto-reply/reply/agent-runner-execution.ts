@@ -312,8 +312,8 @@ export async function runAgentTurnWithFallback(params: {
             provider,
             model,
             runId,
-            authProfile,
-          });
+                authProfile,
+              });
           return runEmbeddedPiAgent({
             ...embeddedContext,
             groupId: resolveGroupSessionKey(params.sessionCtx)?.id,
@@ -324,6 +324,7 @@ export async function runAgentTurnWithFallback(params: {
             ...runBaseParams,
             modelFallbackEnabled: fallbackContext.total > 1,
             prompt: params.commandBody,
+            delegationPrompt: params.followupRun.summaryLine ?? params.commandBody,
             extraSystemPrompt: params.followupRun.run.extraSystemPrompt,
             toolResultFormat: (() => {
               const channel = resolveMessageChannel(

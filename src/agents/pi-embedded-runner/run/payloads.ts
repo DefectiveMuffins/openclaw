@@ -14,7 +14,7 @@ import {
 } from "../../pi-embedded-helpers.js";
 import type { ToolResultFormat } from "../../pi-embedded-subscribe.js";
 import {
-  extractAssistantText,
+  extractAssistantVisibleText,
   extractAssistantThinking,
   formatReasoningMessage,
 } from "../../pi-embedded-utils.js";
@@ -184,15 +184,20 @@ export function buildEmbeddedRunPayloads(params: {
     }
   }
 
+  const visibleAssistant = params.lastAssistant
+    ? extractAssistantVisibleText(params.lastAssistant)
+    : { text: "", source: "none" as const };
   const reasoningText =
-    params.lastAssistant && params.reasoningLevel === "on"
+    params.lastAssistant &&
+    params.reasoningLevel === "on" &&
+    visibleAssistant.source !== "compat_reasoning"
       ? formatReasoningMessage(extractAssistantThinking(params.lastAssistant))
       : "";
   if (reasoningText) {
     replyItems.push({ text: reasoningText, isReasoning: true });
   }
 
-  const fallbackAnswerText = params.lastAssistant ? extractAssistantText(params.lastAssistant) : "";
+  const fallbackAnswerText = visibleAssistant.text;
   const shouldSuppressRawErrorText = (text: string) => {
     if (!lastAssistantErrored) {
       return false;

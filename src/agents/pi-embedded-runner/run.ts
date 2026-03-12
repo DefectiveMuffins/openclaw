@@ -25,6 +25,7 @@ import {
 import { DEFAULT_CONTEXT_TOKENS, DEFAULT_MODEL, DEFAULT_PROVIDER } from "../defaults.js";
 import {
   clearDelegationWaitingForCompletions,
+  getDelegationReviewState,
   getDelegationTracking,
   markDelegationWaitingForCompletions,
   resetDelegationTracking,
@@ -86,6 +87,13 @@ type CopilotTokenState = {
   refreshInFlight?: Promise<void>;
 };
 
+type AttemptSessionSnapshot = {
+  existedBefore: boolean;
+  fileContents?: string;
+};
+
+type BufferedAttemptEmission = () => void | Promise<void>;
+
 const COPILOT_REFRESH_MARGIN_MS = 5 * 60 * 1000;
 const COPILOT_REFRESH_RETRY_MS = 60 * 1000;
 const COPILOT_REFRESH_MIN_DELAY_MS = 5 * 1000;
@@ -138,22 +146,47 @@ const MIN_RUN_RETRY_ITERATIONS = 32;
 const MAX_RUN_RETRY_ITERATIONS = 160;
 const MAX_SOFT_DELEGATION_RETRY_ATTEMPTS = 2;
 
-type HardDelegationPhase = "planning" | "waiting_for_workers" | "synthesis";
+type HardDelegationPhase = "planning" | "waiting_for_workers" | "review" | "synthesis";
 
 const SOFT_DELEGATION_RETRY_SYSTEM_PROMPT =
   "Runtime enforcement: this top-level requester session must delegate the user's work to at least one subagent via sessions_spawn before any final answer. If you answered directly, correct course now: spawn a subagent, wait for its result, then synthesize.";
 
 const HARD_DELEGATION_PLANNING_SYSTEM_PROMPT =
-  "Hard delegation mode (planning): spawn at least one worker via sessions_spawn before any user-facing final answer. Gather minimal context, delegate, then wait.";
+  "Hard delegation mode (planning): call models_list, choose the cheapest sufficient model, and spawn at least one worker via sessions_spawn with explicit model before any user-facing final answer.";
 const HARD_DELEGATION_WAITING_SYSTEM_PROMPT =
-  "Hard delegation mode (waiting_for_workers): do not send a user-facing final answer until at least one task_completion event arrives from a child spawned in this turn.";
+  "Hard delegation mode (waiting_for_workers): do not send a user-facing final answer until at least one typed task_completion event arrives from a child spawned in this turn.";
+const HARD_DELEGATION_REVIEW_SYSTEM_PROMPT =
+  "Hard delegation mode (review): every completed worker result must be reviewed with subagent_review. Reject inadequate results and choose same_model_retry, switch_model_retry, or final_failure.";
 const HARD_DELEGATION_SYNTHESIS_SYSTEM_PROMPT =
-  "Hard delegation mode (synthesis): at least one delegated child completed. Synthesize the child completion events into the final user-visible response.";
+  "Hard delegation mode (synthesis): synthesize only after review gates pass (accepted worker result, or explicit final_failure path).";
 
 const HARD_DELEGATION_PLANNING_FEEDBACK_PROMPT =
-  "Validation: you attempted to finish without spawning a worker. Stay in planning, call sessions_spawn, and continue only after delegation is accepted.";
+  "Validation: you attempted to finish without spawning a worker. Stay in planning, call models_list, then call sessions_spawn with explicit model.";
 const HARD_DELEGATION_WAITING_FEEDBACK_PROMPT =
   "Validation: you attempted to finish before any worker completion. Stay in waiting_for_workers and continue once a task_completion event arrives.";
+const HARD_DELEGATION_REVIEW_FEEDBACK_PROMPT =
+  "Validation: you must review every completed worker result with subagent_review before synthesis.";
+
+function resolveHardDelegationCorrectiveFeedback(params: {
+  action?: "same_model_retry" | "switch_model_retry";
+  rejectedModel?: string;
+}): string {
+  if (params.action === "same_model_retry") {
+    return params.rejectedModel
+      ? "Validation: you rejected a worker result with nextAction=same_model_retry. Spawn another worker now using sessions_spawn.model=" +
+          params.rejectedModel +
+          "."
+      : "Validation: you rejected a worker result with nextAction=same_model_retry. Spawn another worker now using the same model.";
+  }
+  if (params.action === "switch_model_retry") {
+    return params.rejectedModel
+      ? "Validation: you rejected a worker result with nextAction=switch_model_retry. Spawn another worker now using a different model than " +
+          params.rejectedModel +
+          "."
+      : "Validation: you rejected a worker result with nextAction=switch_model_retry. Spawn another worker now with a different model.";
+  }
+  return HARD_DELEGATION_REVIEW_FEEDBACK_PROMPT;
+}
 
 function resolveHardDelegationPhasePrompt(phase: HardDelegationPhase): string {
   if (phase === "planning") {
@@ -161,6 +194,9 @@ function resolveHardDelegationPhasePrompt(phase: HardDelegationPhase): string {
   }
   if (phase === "waiting_for_workers") {
     return HARD_DELEGATION_WAITING_SYSTEM_PROMPT;
+  }
+  if (phase === "review") {
+    return HARD_DELEGATION_REVIEW_SYSTEM_PROMPT;
   }
   return HARD_DELEGATION_SYNTHESIS_SYSTEM_PROMPT;
 }
@@ -238,6 +274,158 @@ function resolveActiveErrorContext(params: {
   return {
     provider: params.lastAssistant?.provider ?? params.provider,
     model: params.lastAssistant?.model ?? params.model,
+  };
+}
+
+function cloneOptionalStringArray(values?: string[]): string[] | undefined {
+  return Array.isArray(values) ? [...values] : undefined;
+}
+
+function cloneReplyPayload(
+  payload: NonNullable<Parameters<NonNullable<RunEmbeddedPiAgentParams["onPartialReply"]>>[0]>,
+): NonNullable<Parameters<NonNullable<RunEmbeddedPiAgentParams["onPartialReply"]>>[0]> {
+  return {
+    ...payload,
+    mediaUrls: cloneOptionalStringArray(payload.mediaUrls),
+  };
+}
+
+function cloneBlockReplyPayload(
+  payload: NonNullable<Parameters<NonNullable<RunEmbeddedPiAgentParams["onBlockReply"]>>[0]>,
+): NonNullable<Parameters<NonNullable<RunEmbeddedPiAgentParams["onBlockReply"]>>[0]> {
+  return {
+    ...payload,
+    mediaUrls: cloneOptionalStringArray(payload.mediaUrls),
+  };
+}
+
+function cloneAgentEvent(
+  event: NonNullable<Parameters<NonNullable<RunEmbeddedPiAgentParams["onAgentEvent"]>>[0]>,
+): NonNullable<Parameters<NonNullable<RunEmbeddedPiAgentParams["onAgentEvent"]>>[0]> {
+  return {
+    stream: event.stream,
+    data: { ...event.data },
+  };
+}
+
+async function snapshotSessionLeaf(sessionFile: string): Promise<AttemptSessionSnapshot> {
+  try {
+    await fs.access(sessionFile);
+  } catch {
+    return { existedBefore: false };
+  }
+  return {
+    existedBefore: true,
+    fileContents: await fs.readFile(sessionFile, "utf8"),
+  };
+}
+
+async function rollbackSessionToSnapshot(
+  sessionFile: string,
+  snapshot: AttemptSessionSnapshot,
+): Promise<void> {
+  if (!snapshot.existedBefore) {
+    await fs.rm(sessionFile, { force: true });
+    return;
+  }
+  if (typeof snapshot.fileContents === "string") {
+    await fs.writeFile(sessionFile, snapshot.fileContents, "utf8");
+  }
+}
+
+function createAttemptVisibilityBuffer(params: {
+  enabled: boolean;
+  onPartialReply?: RunEmbeddedPiAgentParams["onPartialReply"];
+  onAssistantMessageStart?: RunEmbeddedPiAgentParams["onAssistantMessageStart"];
+  onBlockReply?: RunEmbeddedPiAgentParams["onBlockReply"];
+  onBlockReplyFlush?: RunEmbeddedPiAgentParams["onBlockReplyFlush"];
+  onReasoningStream?: RunEmbeddedPiAgentParams["onReasoningStream"];
+  onReasoningEnd?: RunEmbeddedPiAgentParams["onReasoningEnd"];
+  onToolResult?: RunEmbeddedPiAgentParams["onToolResult"];
+  onAgentEvent?: RunEmbeddedPiAgentParams["onAgentEvent"];
+}) {
+  const queued: BufferedAttemptEmission[] = [];
+
+  const queueEmission = (emission: BufferedAttemptEmission) => {
+    if (!params.enabled) {
+      return emission();
+    }
+    queued.push(emission);
+    return undefined;
+  };
+
+  return {
+    onPartialReply: params.onPartialReply
+      ? async (
+          payload: NonNullable<
+            Parameters<NonNullable<RunEmbeddedPiAgentParams["onPartialReply"]>>[0]
+          >,
+        ) => {
+          const cloned = cloneReplyPayload(payload);
+          await queueEmission(() => params.onPartialReply?.(cloned));
+        }
+      : undefined,
+    onAssistantMessageStart: params.onAssistantMessageStart
+      ? async () => {
+          await queueEmission(() => params.onAssistantMessageStart?.());
+        }
+      : undefined,
+    onBlockReply: params.onBlockReply
+      ? async (
+          payload: NonNullable<
+            Parameters<NonNullable<RunEmbeddedPiAgentParams["onBlockReply"]>>[0]
+          >,
+        ) => {
+          const cloned = cloneBlockReplyPayload(payload);
+          await queueEmission(() => params.onBlockReply?.(cloned));
+        }
+      : undefined,
+    onBlockReplyFlush: params.onBlockReplyFlush
+      ? async () => {
+          await queueEmission(() => params.onBlockReplyFlush?.());
+        }
+      : undefined,
+    onReasoningStream: params.onReasoningStream
+      ? async (
+          payload: NonNullable<
+            Parameters<NonNullable<RunEmbeddedPiAgentParams["onReasoningStream"]>>[0]
+          >,
+        ) => {
+          const cloned = cloneReplyPayload(payload);
+          await queueEmission(() => params.onReasoningStream?.(cloned));
+        }
+      : undefined,
+    onReasoningEnd: params.onReasoningEnd
+      ? async () => {
+          await queueEmission(() => params.onReasoningEnd?.());
+        }
+      : undefined,
+    onToolResult: params.onToolResult
+      ? async (
+          payload: NonNullable<
+            Parameters<NonNullable<RunEmbeddedPiAgentParams["onToolResult"]>>[0]
+          >,
+        ) => {
+          const cloned = cloneReplyPayload(payload);
+          await queueEmission(() => params.onToolResult?.(cloned));
+        }
+      : undefined,
+    onAgentEvent: params.onAgentEvent
+      ? (
+          event: NonNullable<Parameters<NonNullable<RunEmbeddedPiAgentParams["onAgentEvent"]>>[0]>,
+        ) => {
+          const cloned = cloneAgentEvent(event);
+          queueEmission(() => params.onAgentEvent?.(cloned));
+        }
+      : undefined,
+    async flush() {
+      for (const emission of queued.splice(0, queued.length)) {
+        await emission();
+      }
+    },
+    discard() {
+      queued.splice(0, queued.length);
+    },
   };
 }
 
@@ -766,11 +954,14 @@ export async function runEmbeddedPiAgent(
       const delegationPolicy = resolveTopLevelDelegationPolicy({
         config: params.config,
         sessionKey: params.sessionKey,
-        prompt: params.prompt,
+        prompt: params.delegationPrompt ?? params.prompt,
+        inputProvenance: params.inputProvenance,
       });
       const delegationRequired = delegationPolicy.requiresDelegation;
+      const resumeExistingDelegation = delegationPolicy.resumeExistingDelegation;
       const softDelegationEnforced = delegationPolicy.mode === "soft" && delegationRequired;
       const hardDelegationEnforced = delegationPolicy.mode === "hard" && delegationRequired;
+      const delegationRetryProtectionEnabled = softDelegationEnforced || hardDelegationEnforced;
 
       const MAX_OVERFLOW_COMPACTION_ATTEMPTS = 3;
       const MAX_RUN_LOOP_ITERATIONS = hardDelegationEnforced
@@ -791,7 +982,7 @@ export async function runEmbeddedPiAgent(
         ? started + Math.max(1, params.timeoutMs)
         : undefined;
 
-      if (delegationRequired) {
+      if (delegationRequired && !resumeExistingDelegation) {
         resetDelegationTracking({
           sessionKey: params.sessionKey,
           sessionId: params.sessionId,
@@ -847,7 +1038,6 @@ export async function runEmbeddedPiAgent(
               },
             };
           }
-          runLoopIterations += 1;
           const copilotAuthRetry = authRetryPending;
           authRetryPending = false;
           attemptedThinking.add(thinkLevel);
@@ -855,13 +1045,16 @@ export async function runEmbeddedPiAgent(
 
           const prompt =
             provider === "anthropic" ? scrubAnthropicRefusalMagic(params.prompt) : params.prompt;
-
-          let hardDelegationMatchedBeforeAttempt = 0;
           if (hardDelegationEnforced) {
             const delegationStateBeforeAttempt = getDelegationTracking({
               sessionKey: params.sessionKey,
               sessionId: params.sessionId,
             });
+            const delegationReviewStateBeforeAttempt = getDelegationReviewState({
+              sessionKey: params.sessionKey,
+              sessionId: params.sessionId,
+            });
+
             if (
               hardDelegationPhase === "planning" &&
               delegationStateBeforeAttempt.spawnedSubagentCount > 0
@@ -876,23 +1069,100 @@ export async function runEmbeddedPiAgent(
               hardDelegationPhase = "waiting_for_workers";
             }
 
-            if (hardDelegationPhase === "waiting_for_workers") {
-              const waitingState = getDelegationTracking({
+            if (
+              hardDelegationPhase === "waiting_for_workers" &&
+              delegationStateBeforeAttempt.matchedCompletionCount > 0
+            ) {
+              clearDelegationWaitingForCompletions({
                 sessionKey: params.sessionKey,
                 sessionId: params.sessionId,
               });
-              hardDelegationMatchedBeforeAttempt = waitingState.matchedCompletionCount;
-              if (waitingState.matchedCompletionCount > 0) {
-                clearDelegationWaitingForCompletions({
-                  sessionKey: params.sessionKey,
-                  sessionId: params.sessionId,
-                });
-                hardDelegationPhase = "synthesis";
-                hardDelegationValidationFeedback = HARD_DELEGATION_SYNTHESIS_SYSTEM_PROMPT;
+              hardDelegationPhase = "review";
+              hardDelegationValidationFeedback = HARD_DELEGATION_REVIEW_SYSTEM_PROMPT;
+            }
+
+            if (hardDelegationPhase === "review") {
+              if (delegationReviewStateBeforeAttempt.unreviewedCompletionCount <= 0) {
+                if (
+                  delegationReviewStateBeforeAttempt.pendingCorrectiveAction ||
+                  delegationReviewStateBeforeAttempt.activeCorrectiveWorkerCount > 0
+                ) {
+                  markDelegationWaitingForCompletions(
+                    {
+                      sessionKey: params.sessionKey,
+                      sessionId: params.sessionId,
+                    },
+                    delegationStateBeforeAttempt.childSessionKeys,
+                  );
+                  hardDelegationPhase = "waiting_for_workers";
+                } else if (
+                  delegationReviewStateBeforeAttempt.acceptedCompletionCount > 0 ||
+                  delegationReviewStateBeforeAttempt.finalFailureRequested
+                ) {
+                  hardDelegationPhase = "synthesis";
+                }
+              }
+            }
+
+            if (hardDelegationPhase === "synthesis") {
+              if (delegationReviewStateBeforeAttempt.unreviewedCompletionCount > 0) {
+                hardDelegationPhase = "review";
+              } else if (delegationReviewStateBeforeAttempt.pendingCorrectiveAction) {
+                hardDelegationPhase = "review";
+              } else if (delegationReviewStateBeforeAttempt.activeCorrectiveWorkerCount > 0) {
+                markDelegationWaitingForCompletions(
+                  {
+                    sessionKey: params.sessionKey,
+                    sessionId: params.sessionId,
+                  },
+                  delegationStateBeforeAttempt.childSessionKeys,
+                );
+                hardDelegationPhase = "waiting_for_workers";
               }
             }
           }
 
+          if (hardDelegationEnforced && hardDelegationPhase === "waiting_for_workers") {
+            const delegationStateBeforeWait = getDelegationTracking({
+              sessionKey: params.sessionKey,
+              sessionId: params.sessionId,
+            });
+            if (delegationStateBeforeWait.matchedCompletionCount <= 0) {
+              if (
+                hardDelegationJoinDeadlineMs !== undefined &&
+                Date.now() >= hardDelegationJoinDeadlineMs
+              ) {
+                return {
+                  payloads: [
+                    {
+                      text: "Request timed out while waiting for delegated worker completion. Please try again.",
+                      isError: true,
+                    },
+                  ],
+                  meta: {
+                    durationMs: Date.now() - started,
+                    agentMeta: {
+                      sessionId: params.sessionId,
+                      provider,
+                      model: model.id,
+                    },
+                    error: {
+                      kind: "retry_limit",
+                      message: "Hard delegation join timed out waiting for task_completion events.",
+                    },
+                  },
+                };
+              }
+
+              const remainingJoinMs =
+                hardDelegationJoinDeadlineMs === undefined
+                  ? 50
+                  : Math.max(1, hardDelegationJoinDeadlineMs - Date.now());
+              const waitMs = Math.max(1, Math.min(50, remainingJoinMs));
+              await new Promise((resolve) => setTimeout(resolve, waitMs));
+              continue;
+            }
+          }
           const delegationPromptParts = [
             params.extraSystemPrompt,
             softDelegationEnforced && softDelegationRetryAttempts > 0
@@ -906,7 +1176,35 @@ export async function runEmbeddedPiAgent(
           const effectiveExtraSystemPrompt =
             delegationPromptParts.length > 0 ? delegationPromptParts.join("\n\n") : undefined;
           hardDelegationValidationFeedback = undefined;
+          const preAttemptSessionSnapshot = delegationRetryProtectionEnabled
+            ? await snapshotSessionLeaf(params.sessionFile)
+            : undefined;
+          const attemptVisibilityBuffer = createAttemptVisibilityBuffer({
+            enabled: delegationRetryProtectionEnabled,
+            onPartialReply: params.onPartialReply,
+            onAssistantMessageStart: params.onAssistantMessageStart,
+            onBlockReply: params.onBlockReply,
+            onBlockReplyFlush: params.onBlockReplyFlush,
+            onReasoningStream: params.onReasoningStream,
+            onReasoningEnd: params.onReasoningEnd,
+            onToolResult: params.onToolResult,
+            onAgentEvent: params.onAgentEvent,
+          });
+          const rejectDelegationAttempt = async () => {
+            attemptVisibilityBuffer.discard();
+            if (!preAttemptSessionSnapshot) {
+              return;
+            }
+            try {
+              await rollbackSessionToSnapshot(params.sessionFile, preAttemptSessionSnapshot);
+            } catch (error) {
+              log.warn(
+                `[delegation-enforcement] failed to rewind rejected attempt transcript: ${String(error)}`,
+              );
+            }
+          };
 
+          runLoopIterations += 1;
           const attempt = await runEmbeddedAttempt({
             sessionId: params.sessionId,
             sessionKey: params.sessionKey,
@@ -952,16 +1250,16 @@ export async function runEmbeddedPiAgent(
             abortSignal: params.abortSignal,
             shouldEmitToolResult: params.shouldEmitToolResult,
             shouldEmitToolOutput: params.shouldEmitToolOutput,
-            onPartialReply: params.onPartialReply,
-            onAssistantMessageStart: params.onAssistantMessageStart,
-            onBlockReply: params.onBlockReply,
-            onBlockReplyFlush: params.onBlockReplyFlush,
+            onPartialReply: attemptVisibilityBuffer.onPartialReply,
+            onAssistantMessageStart: attemptVisibilityBuffer.onAssistantMessageStart,
+            onBlockReply: attemptVisibilityBuffer.onBlockReply,
+            onBlockReplyFlush: attemptVisibilityBuffer.onBlockReplyFlush,
             blockReplyBreak: params.blockReplyBreak,
             blockReplyChunking: params.blockReplyChunking,
-            onReasoningStream: params.onReasoningStream,
-            onReasoningEnd: params.onReasoningEnd,
-            onToolResult: params.onToolResult,
-            onAgentEvent: params.onAgentEvent,
+            onReasoningStream: attemptVisibilityBuffer.onReasoningStream,
+            onReasoningEnd: attemptVisibilityBuffer.onReasoningEnd,
+            onToolResult: attemptVisibilityBuffer.onToolResult,
+            onAgentEvent: attemptVisibilityBuffer.onAgentEvent,
             extraSystemPrompt: effectiveExtraSystemPrompt,
             inputProvenance: params.inputProvenance,
             streamParams: params.streamParams,
@@ -1007,13 +1305,24 @@ export async function runEmbeddedPiAgent(
           const delegationChecksAllowed = !promptError && !aborted && !timedOut;
 
           if (hardDelegationEnforced && delegationChecksAllowed) {
+            const delegationReviewState = getDelegationReviewState({
+              sessionKey: params.sessionKey,
+              sessionId: params.sessionId,
+            });
+
             if (hardDelegationPhase === "planning") {
               if (delegationState.spawnedSubagentCount <= 0) {
                 hardDelegationValidationFeedback = HARD_DELEGATION_PLANNING_FEEDBACK_PROMPT;
                 log.warn(
-                  `[delegation-enforcement] sessionKey=${params.sessionKey ?? params.sessionId} ` +
-                    `provider=${provider}/${modelId} phase=planning violation=no_subagent_spawn`,
+                  "[delegation-enforcement] sessionKey=" +
+                    (params.sessionKey ?? params.sessionId) +
+                    " provider=" +
+                    provider +
+                    "/" +
+                    modelId +
+                    " phase=planning violation=no_subagent_spawn",
                 );
+                await rejectDelegationAttempt();
                 continue;
               }
 
@@ -1025,57 +1334,18 @@ export async function runEmbeddedPiAgent(
                 delegationState.childSessionKeys,
               );
               hardDelegationPhase = "waiting_for_workers";
+              hardDelegationValidationFeedback = HARD_DELEGATION_WAITING_FEEDBACK_PROMPT;
+              await rejectDelegationAttempt();
+              continue;
+            }
 
-              const waitingState = getDelegationTracking({
-                sessionKey: params.sessionKey,
-                sessionId: params.sessionId,
-              });
-              if (waitingState.matchedCompletionCount <= 0) {
-                if (
-                  hardDelegationJoinDeadlineMs !== undefined &&
-                  Date.now() >= hardDelegationJoinDeadlineMs
-                ) {
-                  return {
-                    payloads: [
-                      {
-                        text: "Request timed out while waiting for delegated worker completion. Please try again.",
-                        isError: true,
-                      },
-                    ],
-                    meta: {
-                      durationMs: Date.now() - started,
-                      agentMeta: {
-                        sessionId: params.sessionId,
-                        provider,
-                        model: model.id,
-                      },
-                      error: {
-                        kind: "retry_limit",
-                        message:
-                          "Hard delegation join timed out waiting for task_completion events.",
-                      },
-                    },
-                  };
-                }
-                hardDelegationValidationFeedback = HARD_DELEGATION_WAITING_FEEDBACK_PROMPT;
-                continue;
-              }
-
-              clearDelegationWaitingForCompletions({
-                sessionKey: params.sessionKey,
-                sessionId: params.sessionId,
-              });
-              hardDelegationPhase = "synthesis";
-              if (hardDelegationMatchedBeforeAttempt <= 0) {
-                hardDelegationValidationFeedback = HARD_DELEGATION_SYNTHESIS_SYSTEM_PROMPT;
-                continue;
-              }
-            } else if (hardDelegationPhase === "waiting_for_workers") {
+            if (hardDelegationPhase === "waiting_for_workers") {
               if (delegationState.matchedCompletionCount <= 0) {
                 if (
                   hardDelegationJoinDeadlineMs !== undefined &&
                   Date.now() >= hardDelegationJoinDeadlineMs
                 ) {
+                  await rejectDelegationAttempt();
                   return {
                     payloads: [
                       {
@@ -1099,6 +1369,7 @@ export async function runEmbeddedPiAgent(
                   };
                 }
                 hardDelegationValidationFeedback = HARD_DELEGATION_WAITING_FEEDBACK_PROMPT;
+                await rejectDelegationAttempt();
                 continue;
               }
 
@@ -1106,9 +1377,93 @@ export async function runEmbeddedPiAgent(
                 sessionKey: params.sessionKey,
                 sessionId: params.sessionId,
               });
+              hardDelegationPhase = "review";
+              hardDelegationValidationFeedback = HARD_DELEGATION_REVIEW_FEEDBACK_PROMPT;
+              await rejectDelegationAttempt();
+              continue;
+            }
+
+            if (hardDelegationPhase === "review") {
+              if (delegationReviewState.unreviewedCompletionCount > 0) {
+                hardDelegationValidationFeedback = HARD_DELEGATION_REVIEW_FEEDBACK_PROMPT;
+                await rejectDelegationAttempt();
+                continue;
+              }
+
+              if (delegationReviewState.pendingCorrectiveAction) {
+                hardDelegationValidationFeedback = resolveHardDelegationCorrectiveFeedback({
+                  action: delegationReviewState.pendingCorrectiveAction,
+                  rejectedModel: delegationReviewState.pendingCorrectiveRejectedModel,
+                });
+                await rejectDelegationAttempt();
+                continue;
+              }
+
+              if (delegationReviewState.activeCorrectiveWorkerCount > 0) {
+                markDelegationWaitingForCompletions(
+                  {
+                    sessionKey: params.sessionKey,
+                    sessionId: params.sessionId,
+                  },
+                  delegationState.childSessionKeys,
+                );
+                hardDelegationPhase = "waiting_for_workers";
+                hardDelegationValidationFeedback = HARD_DELEGATION_WAITING_FEEDBACK_PROMPT;
+                await rejectDelegationAttempt();
+                continue;
+              }
+
+              if (
+                delegationReviewState.acceptedCompletionCount <= 0 &&
+                !delegationReviewState.finalFailureRequested
+              ) {
+                hardDelegationValidationFeedback = HARD_DELEGATION_REVIEW_FEEDBACK_PROMPT;
+                await rejectDelegationAttempt();
+                continue;
+              }
+
               hardDelegationPhase = "synthesis";
-              if (hardDelegationMatchedBeforeAttempt <= 0) {
-                hardDelegationValidationFeedback = HARD_DELEGATION_SYNTHESIS_SYSTEM_PROMPT;
+              hardDelegationValidationFeedback = HARD_DELEGATION_SYNTHESIS_SYSTEM_PROMPT;
+              await rejectDelegationAttempt();
+              continue;
+            }
+
+            if (hardDelegationPhase === "synthesis") {
+              if (delegationReviewState.unreviewedCompletionCount > 0) {
+                hardDelegationPhase = "review";
+                hardDelegationValidationFeedback = HARD_DELEGATION_REVIEW_FEEDBACK_PROMPT;
+                await rejectDelegationAttempt();
+                continue;
+              }
+              if (delegationReviewState.pendingCorrectiveAction) {
+                hardDelegationPhase = "review";
+                hardDelegationValidationFeedback = resolveHardDelegationCorrectiveFeedback({
+                  action: delegationReviewState.pendingCorrectiveAction,
+                  rejectedModel: delegationReviewState.pendingCorrectiveRejectedModel,
+                });
+                await rejectDelegationAttempt();
+                continue;
+              }
+              if (delegationReviewState.activeCorrectiveWorkerCount > 0) {
+                markDelegationWaitingForCompletions(
+                  {
+                    sessionKey: params.sessionKey,
+                    sessionId: params.sessionId,
+                  },
+                  delegationState.childSessionKeys,
+                );
+                hardDelegationPhase = "waiting_for_workers";
+                hardDelegationValidationFeedback = HARD_DELEGATION_WAITING_FEEDBACK_PROMPT;
+                await rejectDelegationAttempt();
+                continue;
+              }
+              if (
+                delegationReviewState.acceptedCompletionCount <= 0 &&
+                !delegationReviewState.finalFailureRequested
+              ) {
+                hardDelegationPhase = "review";
+                hardDelegationValidationFeedback = HARD_DELEGATION_REVIEW_FEEDBACK_PROMPT;
+                await rejectDelegationAttempt();
                 continue;
               }
             }
@@ -1126,8 +1481,10 @@ export async function runEmbeddedPiAgent(
                   `provider=${provider}/${modelId} retry=${softDelegationRetryAttempts} ` +
                   `reason=no_subagent_spawn`,
               );
+              await rejectDelegationAttempt();
               continue;
             }
+            await rejectDelegationAttempt();
             return {
               payloads: [
                 {
@@ -1149,6 +1506,7 @@ export async function runEmbeddedPiAgent(
               },
             };
           }
+          await attemptVisibilityBuffer.flush();
           const formattedAssistantErrorText = lastAssistant
             ? formatAssistantErrorText(lastAssistant, {
                 cfg: params.config,
@@ -1639,6 +1997,42 @@ export async function runEmbeddedPiAgent(
             };
           }
 
+          if (
+            hardDelegationEnforced &&
+            hardDelegationPhase === "synthesis" &&
+            !aborted &&
+            !timedOut &&
+            payloads.length === 0 &&
+            !attempt.clientToolCall &&
+            !attempt.didSendViaMessagingTool
+          ) {
+            return {
+              payloads: [
+                {
+                  text:
+                    "Delegated worker review completed, but the manager did not produce a final response. Please try again.",
+                  isError: true,
+                },
+              ],
+              meta: {
+                durationMs: Date.now() - started,
+                agentMeta,
+                aborted,
+                systemPromptReport: attempt.systemPromptReport,
+                error: {
+                  kind: "empty_response",
+                  message:
+                    "Hard delegation synthesis completed without a user-visible final response.",
+                },
+              },
+              didSendViaMessagingTool: attempt.didSendViaMessagingTool,
+              messagingToolSentTexts: attempt.messagingToolSentTexts,
+              messagingToolSentMediaUrls: attempt.messagingToolSentMediaUrls,
+              messagingToolSentTargets: attempt.messagingToolSentTargets,
+              successfulCronAdds: attempt.successfulCronAdds,
+            };
+          }
+
           log.debug(
             `embedded run done: runId=${params.runId} sessionId=${params.sessionId} durationMs=${Date.now() - started} aborted=${aborted}`,
           );
@@ -1688,4 +2082,3 @@ export async function runEmbeddedPiAgent(
     }),
   );
 }
-

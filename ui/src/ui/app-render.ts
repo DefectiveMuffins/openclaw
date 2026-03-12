@@ -18,6 +18,8 @@ import {
   moveHostedRoutingProvider,
   startHostedProviderAuth,
   submitHostedProviderAuthStep,
+  updateAgentModelFallbacks,
+  updateAgentPrimaryModel,
   updateHostedRoutingAppendConfiguredModels,
   updateHostedRoutingMode,
   updateHostedRoutingProviderEnabled,
@@ -74,6 +76,7 @@ import {
   installSkill,
   loadSkills,
   saveSkillApiKey,
+  setSkillTrust,
   updateSkillEdit,
   updateSkillEnabled,
 } from "./controllers/skills.ts";
@@ -898,89 +901,22 @@ export function renderApp(state: AppViewState) {
                 },
                 onDiscoverLmStudioModels: () => discoverProviderModels(state, "lmstudio"),
                 onModelChange: (agentId, modelId) => {
-                  if (!configValue) {
-                    return;
-                  }
-                  const list = (configValue as { agents?: { list?: unknown[] } }).agents?.list;
-                  if (!Array.isArray(list)) {
-                    return;
-                  }
-                  const index = list.findIndex(
-                    (entry) =>
-                      entry &&
-                      typeof entry === "object" &&
-                      "id" in entry &&
-                      (entry as { id?: string }).id === agentId,
-                  );
-                  if (index < 0) {
-                    return;
-                  }
-                  const basePath = ["agents", "list", index, "model"];
-                  if (!modelId) {
-                    removeConfigFormValue(state, basePath);
-                    return;
-                  }
-                  const entry = list[index] as { model?: unknown };
-                  const existing = entry?.model;
-                  if (existing && typeof existing === "object" && !Array.isArray(existing)) {
-                    const fallbacks = (existing as { fallbacks?: unknown }).fallbacks;
-                    const next = {
-                      primary: modelId,
-                      ...(Array.isArray(fallbacks) ? { fallbacks } : {}),
-                    };
-                    updateConfigFormValue(state, basePath, next);
-                  } else {
-                    updateConfigFormValue(state, basePath, modelId);
-                  }
+                  updateAgentPrimaryModel({
+                    state,
+                    configValue: configValue as Record<string, unknown> | null | undefined,
+                    agentId,
+                    defaultAgentId: state.agentsList?.defaultId,
+                    modelId,
+                  });
                 },
                 onModelFallbacksChange: (agentId, fallbacks) => {
-                  if (!configValue) {
-                    return;
-                  }
-                  const list = (configValue as { agents?: { list?: unknown[] } }).agents?.list;
-                  if (!Array.isArray(list)) {
-                    return;
-                  }
-                  const index = list.findIndex(
-                    (entry) =>
-                      entry &&
-                      typeof entry === "object" &&
-                      "id" in entry &&
-                      (entry as { id?: string }).id === agentId,
-                  );
-                  if (index < 0) {
-                    return;
-                  }
-                  const basePath = ["agents", "list", index, "model"];
-                  const entry = list[index] as { model?: unknown };
-                  const normalized = fallbacks.map((name) => name.trim()).filter(Boolean);
-                  const existing = entry.model;
-                  const resolvePrimary = () => {
-                    if (typeof existing === "string") {
-                      return existing.trim() || null;
-                    }
-                    if (existing && typeof existing === "object" && !Array.isArray(existing)) {
-                      const primary = (existing as { primary?: unknown }).primary;
-                      if (typeof primary === "string") {
-                        const trimmed = primary.trim();
-                        return trimmed || null;
-                      }
-                    }
-                    return null;
-                  };
-                  const primary = resolvePrimary();
-                  if (normalized.length === 0) {
-                    if (primary) {
-                      updateConfigFormValue(state, basePath, primary);
-                    } else {
-                      removeConfigFormValue(state, basePath);
-                    }
-                    return;
-                  }
-                  const next = primary
-                    ? { primary, fallbacks: normalized }
-                    : { fallbacks: normalized };
-                  updateConfigFormValue(state, basePath, next);
+                  updateAgentModelFallbacks({
+                    state,
+                    configValue: configValue as Record<string, unknown> | null | undefined,
+                    agentId,
+                    defaultAgentId: state.agentsList?.defaultId,
+                    fallbacks,
+                  });
                 },
                 onHostedRoutingModeChange: (mode) => updateHostedRoutingMode(state, mode),
                 onHostedRoutingAppendConfiguredModelsChange: (enabled) =>
@@ -1014,6 +950,7 @@ export function renderApp(state: AppViewState) {
                 onSaveKey: (key) => saveSkillApiKey(state, key),
                 onInstall: (skillKey, name, installId) =>
                   installSkill(state, skillKey, name, installId),
+                onTrust: (skillKey, action) => setSkillTrust(state, skillKey, action),
               })
             : nothing
         }
@@ -1262,32 +1199,24 @@ export function renderApp(state: AppViewState) {
             : nothing
         }
       </main>
-      ${
-        renderHostedProviderAuthDialog({
-          providerId: state.hostedProviderAuthProviderId,
-          step: state.hostedProviderAuthStep,
-          value: state.hostedProviderAuthValue,
-          busy: state.hostedProviderAuthBusy,
-          error: state.hostedProviderAuthError,
-          onValueChange: (value) => {
-            state.hostedProviderAuthValue = value;
-          },
-          onSubmit: (value) => {
-            void handleHostedProviderAuthSubmit(value);
-          },
-          onCancel: () => {
-            void handleHostedProviderAuthCancel();
-          },
-        })
-      }
+      ${renderHostedProviderAuthDialog({
+        providerId: state.hostedProviderAuthProviderId,
+        step: state.hostedProviderAuthStep,
+        value: state.hostedProviderAuthValue,
+        busy: state.hostedProviderAuthBusy,
+        error: state.hostedProviderAuthError,
+        onValueChange: (value) => {
+          state.hostedProviderAuthValue = value;
+        },
+        onSubmit: (value) => {
+          void handleHostedProviderAuthSubmit(value);
+        },
+        onCancel: () => {
+          void handleHostedProviderAuthCancel();
+        },
+      })}
       ${renderExecApprovalPrompt(state)}
       ${renderGatewayUrlConfirmation(state)}
     </div>
   `;
 }
-
-
-
-
-
-

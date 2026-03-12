@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
+import { createTaskCompletionFollowUpInputProvenance } from "../sessions/input-provenance.js";
 import {
   filterToolsByPolicy,
   isToolAllowedByPolicyName,
@@ -32,18 +33,28 @@ describe("pi-tools.policy", () => {
 });
 
 describe("resolveEffectiveToolPolicy delegation modes", () => {
-  it("defaults top-level requester sessions to orchestrator in soft mode", () => {
+  it("defaults top-level requester sessions to no forced profile for non-action turns", () => {
     const resolved = resolveEffectiveToolPolicy({
       config: {} as OpenClawConfig,
       sessionKey: "agent:main:main",
+      prompt: "hello",
+    });
+    expect(resolved.profile).toBeUndefined();
+  });
+
+  it("defaults top-level requester sessions to orchestrator for action turns in soft mode", () => {
+    const resolved = resolveEffectiveToolPolicy({
+      config: {} as OpenClawConfig,
+      sessionKey: "agent:main:main",
+      prompt: "Run tests and summarize failures",
     });
     expect(resolved.profile).toBe("orchestrator");
   });
 
-  it("forces manager profile for top-level requester sessions in hard mode", () => {
+  it("forces manager profile for top-level requester sessions in hard mode when scope=all", () => {
     const resolved = resolveEffectiveToolPolicy({
       config: {
-        agents: { defaults: { subagents: { delegation: { mode: "hard" } } } },
+        agents: { defaults: { subagents: { delegation: { mode: "hard", scope: "all" } } } },
       } as OpenClawConfig,
       sessionKey: "agent:main:main",
     });
@@ -79,6 +90,34 @@ describe("resolveEffectiveToolPolicy delegation modes", () => {
       prompt: "hi there",
     });
     expect(nonActionPrompt.profile).toBeUndefined();
+  });
+
+  it("does not force delegation profiles for internal_system turns", () => {
+    const resolved = resolveEffectiveToolPolicy({
+      config: {
+        agents: { defaults: { subagents: { delegation: { mode: "hard", scope: "all" } } } },
+      } as OpenClawConfig,
+      sessionKey: "agent:main:main",
+      prompt: "A new session was started via /new or /reset.",
+      inputProvenance: { kind: "internal_system" },
+    });
+    expect(resolved.profile).toBeUndefined();
+  });
+
+  it("keeps the delegated manager profile for task completion follow-ups", () => {
+    const resolved = resolveEffectiveToolPolicy({
+      config: {
+        agents: {
+          defaults: { subagents: { delegation: { mode: "hard", scope: "action_only" } } },
+        },
+      } as OpenClawConfig,
+      sessionKey: "agent:main:main",
+      prompt: "Worker finished.",
+      inputProvenance: createTaskCompletionFollowUpInputProvenance({
+        sourceSessionKey: "agent:main:subagent:child-1",
+      }),
+    });
+    expect(resolved.profile).toBe("manager");
   });
 
   it("does not force delegation profile when mode is off", () => {

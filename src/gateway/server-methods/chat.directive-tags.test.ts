@@ -12,6 +12,8 @@ const mockState = vi.hoisted(() => ({
   sessionId: "sess-1",
   finalText: "[[reply_to_current]]",
   triggerAgentRunStart: false,
+  dispatchMode: "final" as "final" | "pending",
+  historyMessages: [] as unknown[],
   agentRunId: "run-agent-1",
   sessionEntry: {} as Record<string, unknown>,
   lastDispatchCtx: undefined as MsgContext | undefined,
@@ -40,6 +42,7 @@ vi.mock("../session-utils.js", async (importOriginal) => {
       },
       canonicalKey: "main",
     }),
+    readSessionMessages: () => mockState.historyMessages,
   };
 });
 
@@ -59,6 +62,9 @@ vi.mock("../../auto-reply/dispatch.js", () => ({
       mockState.lastDispatchCtx = params.ctx;
       if (mockState.triggerAgentRunStart) {
         params.replyOptions?.onAgentRunStart?.(mockState.agentRunId);
+      }
+      if (mockState.dispatchMode === "pending") {
+        return await new Promise(() => {});
       }
       params.dispatcher.sendFinalReply({ text: mockState.finalText });
       params.dispatcher.markComplete();
@@ -114,11 +120,13 @@ function createChatContext(): Pick<
   | "nodeSendToSession"
   | "agentRunSeq"
   | "chatAbortControllers"
+  | "chatHistorySnapshots"
   | "chatRunBuffers"
   | "chatDeltaSentAt"
   | "chatAbortedRuns"
   | "removeChatRun"
   | "dedupe"
+  | "loadGatewayModelCatalog"
   | "registerToolEventRecipient"
   | "logGateway"
 > {
@@ -127,11 +135,13 @@ function createChatContext(): Pick<
     nodeSendToSession: vi.fn() as unknown as GatewayRequestContext["nodeSendToSession"],
     agentRunSeq: new Map<string, number>(),
     chatAbortControllers: new Map(),
+    chatHistorySnapshots: new Map(),
     chatRunBuffers: new Map(),
     chatDeltaSentAt: new Map(),
     chatAbortedRuns: new Map(),
     removeChatRun: vi.fn(),
     dedupe: new Map(),
+    loadGatewayModelCatalog: vi.fn(async () => []),
     registerToolEventRecipient: vi.fn(),
     logGateway: {
       warn: vi.fn(),
@@ -190,6 +200,8 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
   afterEach(() => {
     mockState.finalText = "[[reply_to_current]]";
     mockState.triggerAgentRunStart = false;
+    mockState.dispatchMode = "final";
+    mockState.historyMessages = [];
     mockState.agentRunId = "run-agent-1";
     mockState.sessionEntry = {};
     mockState.lastDispatchCtx = undefined;
@@ -437,5 +449,52 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
         AccountId: "default",
       }),
     );
+  });
+
+  it("chat.history falls back to the live session snapshot while a run is active", async () => {
+    createTranscriptFixture("openclaw-chat-history-live-snapshot-");
+    mockState.dispatchMode = "pending";
+    mockState.historyMessages = [];
+    const respond = vi.fn();
+    const context = createChatContext();
+
+    await chatHandlers["chat.send"]({
+      params: {
+        sessionKey: "main",
+        message: "hello from refresh race",
+        idempotencyKey: "idem-history-live-snapshot",
+      },
+      respond: respond as unknown as Parameters<(typeof chatHandlers)["chat.send"]>[0]["respond"],
+      req: {} as never,
+      client: null as never,
+      isWebchatConnect: () => false,
+      context: context as GatewayRequestContext,
+    });
+
+    const historyRespond = vi.fn();
+    await chatHandlers["chat.history"]({
+      params: {
+        sessionKey: "main",
+        limit: 100,
+      },
+      respond: historyRespond as unknown as Parameters<
+        (typeof chatHandlers)["chat.history"]
+      >[0]["respond"],
+      req: {} as never,
+      client: null as never,
+      isWebchatConnect: () => false,
+      context: context as GatewayRequestContext,
+    });
+
+    const [ok, payload] = historyRespond.mock.calls.at(-1) ?? [];
+    expect(ok).toBe(true);
+    expect(payload).toMatchObject({
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "hello from refresh race" }],
+        },
+      ],
+    });
   });
 });

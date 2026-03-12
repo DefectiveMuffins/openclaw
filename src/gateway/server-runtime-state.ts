@@ -6,6 +6,7 @@ import type { CliDeps } from "../cli/deps.js";
 import type { createSubsystemLogger } from "../logging/subsystem.js";
 import type { PluginRegistry } from "../plugins/registry.js";
 import type { RuntimeEnv } from "../runtime.js";
+import type { ChatHistorySnapshotStore } from "./chat-history-snapshots.js";
 import type { AuthRateLimiter } from "./auth-rate-limit.js";
 import type { ResolvedGatewayAuth } from "./auth.js";
 import type { ChatAbortControllerEntry } from "./chat-abort.js";
@@ -72,6 +73,7 @@ export async function createGatewayRuntimeState(params: {
   agentRunSeq: Map<string, number>;
   dedupe: Map<string, DedupeEntry>;
   chatRunState: ReturnType<typeof createChatRunState>;
+  chatHistorySnapshots: ChatHistorySnapshotStore;
   chatRunBuffers: Map<string, string>;
   chatDeltaSentAt: Map<string, number>;
   addChatRun: (sessionId: string, entry: ChatRunEntry) => void;
@@ -196,6 +198,7 @@ export async function createGatewayRuntimeState(params: {
   const agentRunSeq = new Map<string, number>();
   const dedupe = new Map<string, DedupeEntry>();
   const chatRunState = createChatRunState();
+  const chatHistorySnapshots: ChatHistorySnapshotStore = new Map();
   const chatRunRegistry = chatRunState.registry;
   const chatRunBuffers = chatRunState.buffers;
   const chatDeltaSentAt = chatRunState.deltaSentAt;
@@ -216,6 +219,7 @@ export async function createGatewayRuntimeState(params: {
     agentRunSeq,
     dedupe,
     chatRunState,
+    chatHistorySnapshots,
     chatRunBuffers,
     chatDeltaSentAt,
     addChatRun,

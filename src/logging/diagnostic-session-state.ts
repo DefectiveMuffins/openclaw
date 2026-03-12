@@ -17,6 +17,44 @@ export type SessionState = {
     completedChildSessionKeys?: string[];
     matchedCompletionCount?: number;
     lastCompletionAt?: number;
+    nextCompletionId?: number;
+    completions?: Array<{
+      id: number;
+      childSessionKey?: string;
+      status: "ok" | "timeout" | "error" | "unknown";
+      statusLabel: string;
+      workerModel?: string;
+      role?: string;
+      deliverable?: string;
+      acceptanceCriteria?: string[];
+      responseFormat?: string;
+      structuredResult?: unknown;
+      malformedStructuredResult?: boolean;
+      reviewed?: boolean;
+      decision?: "accept" | "reject";
+      nextAction?: "same_model_retry" | "switch_model_retry" | "final_failure";
+      reason?: string;
+      createdAt: number;
+    }>;
+    acceptedCompletionCount?: number;
+    rejectedCompletionCount?: number;
+    correctiveRetryCount?: number;
+    childSpawns?: Array<{
+      childSessionKey: string;
+      model?: string;
+      spawnedAt: number;
+      isCorrective?: boolean;
+      correctiveAttempt?: number;
+      awaitingCompletion?: boolean;
+    }>;
+    pendingCorrectiveAction?: {
+      requiredAction: "same_model_retry" | "switch_model_retry";
+      rejectedChildSessionKey: string;
+      rejectedModel?: string;
+      rejectedCompletionId: number;
+      createdAt: number;
+    };
+    finalFailureRequested?: boolean;
   };
 };
 

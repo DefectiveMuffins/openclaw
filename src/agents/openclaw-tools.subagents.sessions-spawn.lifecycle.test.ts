@@ -360,6 +360,8 @@ describe("openclaw-tools: subagents (sessions_spawn lifecycle)", () => {
       endedAt: 2000,
     });
 
+    await waitFor(() => ctx.calls.filter((call) => call.method === "agent").length >= 2);
+
     const agentCalls = ctx.calls.filter((call) => call.method === "agent");
     expect(agentCalls).toHaveLength(2);
     const announceParams = agentCalls[1]?.params as

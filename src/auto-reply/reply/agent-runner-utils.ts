@@ -176,6 +176,7 @@ export function buildEmbeddedRunBaseParams(params: {
     ownerNumbers: params.run.ownerNumbers,
     senderIsOwner: params.run.senderIsOwner,
     enforceFinalTag: resolveEnforceFinalTag(params.run, params.provider),
+    inputProvenance: params.run.inputProvenance,
     provider: params.provider,
     model: params.model,
     ...params.authProfile,

@@ -161,8 +161,8 @@ describe("buildAgentSystemPrompt", () => {
     });
 
     expect(prompt).toContain("## Manager Mode");
-    expect(prompt).toContain("planning -> waiting_for_workers -> synthesis");
-    expect(prompt).toContain("task_completion event");
+    expect(prompt).toContain("planning -> waiting_for_workers -> review -> synthesis");
+    expect(prompt).toContain("task_completion result");
     expect(prompt).not.toContain("## Orchestrator Mode");
   });
 

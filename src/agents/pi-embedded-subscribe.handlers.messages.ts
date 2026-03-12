@@ -10,7 +10,7 @@ import {
 import type { EmbeddedPiSubscribeContext } from "./pi-embedded-subscribe.handlers.types.js";
 import { appendRawStream } from "./pi-embedded-subscribe.raw-stream.js";
 import {
-  extractAssistantText,
+  extractAssistantVisibleText,
   extractAssistantThinking,
   extractThinkingFromTaggedStream,
   extractThinkingFromTaggedText,
@@ -263,14 +263,18 @@ export function handleMessageEnd(
   ctx.recordAssistantUsage((assistantMessage as { usage?: unknown }).usage);
   promoteThinkingTagsToBlocks(assistantMessage);
 
-  const rawText = extractAssistantText(assistantMessage);
+  const visibleAssistant = extractAssistantVisibleText(assistantMessage);
+  const rawText = visibleAssistant.text;
   appendRawStream({
     ts: Date.now(),
     event: "assistant_message_end",
     runId: ctx.params.runId,
     sessionId: (ctx.params.session as { id?: string }).id,
     rawText,
-    rawThinking: extractAssistantThinking(assistantMessage),
+    rawThinking:
+      visibleAssistant.source === "compat_reasoning"
+        ? ""
+        : extractAssistantThinking(assistantMessage),
   });
 
   const text = resolveSilentReplyFallbackText({
@@ -279,7 +283,9 @@ export function handleMessageEnd(
   });
   const rawThinking =
     ctx.state.includeReasoning || ctx.state.streamReasoning
-      ? extractAssistantThinking(assistantMessage) || extractThinkingFromTaggedText(rawText)
+      ? visibleAssistant.source === "compat_reasoning"
+        ? ""
+        : extractAssistantThinking(assistantMessage) || extractThinkingFromTaggedText(rawText)
       : "";
   const formattedReasoning = rawThinking ? formatReasoningMessage(rawThinking) : "";
   const trimmedText = text.trim();

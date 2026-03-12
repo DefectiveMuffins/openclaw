@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { TASK_COMPLETION_FOLLOW_UP_SOURCE_TOOL } from "../sessions/input-provenance.js";
 
 type GatewayCall = {
   method?: string;
@@ -140,20 +141,29 @@ describe("subagent announce timeout config", () => {
   it("uses 60s timeout by default for direct announce agent call", async () => {
     await runAnnounceFlowForTest("run-default-timeout");
 
-    const directAgentCall = findGatewayCall(
-      (call) => call.method === "agent" && call.expectFinal === true,
-    );
+    const directAgentCall = findGatewayCall((call) => call.method === "agent");
     expect(directAgentCall?.timeoutMs).toBe(60_000);
+    expect(directAgentCall?.expectFinal).not.toBe(true);
   });
 
   it("honors configured announce timeout for direct announce agent call", async () => {
     setConfiguredAnnounceTimeout(90_000);
     await runAnnounceFlowForTest("run-config-timeout-agent");
 
-    const directAgentCall = findGatewayCall(
-      (call) => call.method === "agent" && call.expectFinal === true,
-    );
+    const directAgentCall = findGatewayCall((call) => call.method === "agent");
     expect(directAgentCall?.timeoutMs).toBe(90_000);
+    expect(directAgentCall?.expectFinal).not.toBe(true);
+  });
+
+  it("marks direct announce follow-up agent calls with task completion provenance", async () => {
+    await runAnnounceFlowForTest("run-provenance");
+
+    const directAgentCall = findGatewayCall((call) => call.method === "agent");
+    expect(directAgentCall?.params?.inputProvenance).toMatchObject({
+      kind: "inter_session",
+      sourceSessionKey: "agent:main:subagent:worker",
+      sourceTool: TASK_COMPLETION_FOLLOW_UP_SOURCE_TOOL,
+    });
   });
 
   it("honors configured announce timeout for completion direct send call", async () => {

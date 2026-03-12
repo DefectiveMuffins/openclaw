@@ -3,6 +3,7 @@ import { DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH } from "../config/agent-limits.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { resolveChannelGroupToolsPolicy } from "../config/group-policy.js";
 import { normalizeAgentId } from "../routing/session-key.js";
+import type { InputProvenance } from "../sessions/input-provenance.js";
 import { resolveThreadParentSessionKey } from "../sessions/session-key-utils.js";
 import { normalizeMessageChannel } from "../utils/message-channel.js";
 import { resolveAgentConfig, resolveAgentIdFromSessionKey } from "./agent-scope.js";
@@ -205,6 +206,7 @@ export function resolveEffectiveToolPolicy(params: {
   modelId?: string;
   delegationRequired?: boolean;
   prompt?: string;
+  inputProvenance?: InputProvenance;
 }) {
   const explicitAgentId =
     typeof params.agentId === "string" && params.agentId.trim()
@@ -223,6 +225,7 @@ export function resolveEffectiveToolPolicy(params: {
     sessionKey: params.sessionKey,
     prompt: params.prompt,
     delegationRequired: params.delegationRequired,
+    inputProvenance: params.inputProvenance,
   });
   const forcedProfile = delegationPolicy.forcedToolProfile;
   const profile = forcedProfile ?? agentTools?.profile ?? globalTools?.profile;

@@ -42,6 +42,14 @@ function getSessionsSpawnRuntime(params: unknown): "subagent" | "acp" {
   return params.runtime === "acp" ? "acp" : "subagent";
 }
 
+function getSessionsSpawnModel(params: unknown): string | undefined {
+  if (!isPlainObject(params)) {
+    return undefined;
+  }
+  const model = params.model;
+  return typeof model === "string" && model.trim() ? model.trim() : undefined;
+}
+
 function maybeRecordDelegatedSpawn(args: {
   ctx?: HookContext;
   toolName: string;
@@ -70,6 +78,12 @@ function maybeRecordDelegatedSpawn(args: {
       sessionId: args.ctx.agentId,
     },
     resultDetails.childSessionKey,
+    {
+      model:
+        (typeof resultDetails.model === "string" && resultDetails.model.trim()
+          ? resultDetails.model.trim()
+          : undefined) ?? getSessionsSpawnModel(args.toolParams),
+    },
   );
 }
 function shouldEmitLoopWarning(state: SessionState, warningKey: string, count: number): boolean {

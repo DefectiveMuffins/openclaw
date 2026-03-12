@@ -19,6 +19,7 @@ import { logVerbose } from "../../globals.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { clearCommandLane, getQueueSize } from "../../process/command-queue.js";
 import { normalizeMainKey } from "../../routing/session-key.js";
+import type { InputProvenance } from "../../sessions/input-provenance.js";
 import { isReasoningTagProvider } from "../../utils/provider-utils.js";
 import { hasControlCommand } from "../command-detection.js";
 import { buildInboundMediaNote } from "../media-note.js";
@@ -54,6 +55,7 @@ import { appendUntrustedContext } from "./untrusted-context.js";
 type AgentDefaults = NonNullable<OpenClawConfig["agents"]>["defaults"];
 type ExecOverrides = Pick<ExecToolDefaults, "host" | "security" | "ask" | "node">;
 
+// Keep the reset notice ASCII-safe in source so Windows code pages do not garble it.
 function buildResetSessionNoticeText(params: {
   provider: string;
   model: string;
@@ -62,9 +64,16 @@ function buildResetSessionNoticeText(params: {
 }): string {
   const modelLabel = `${params.provider}/${params.model}`;
   const defaultLabel = `${params.defaultProvider}/${params.defaultModel}`;
+  const prefix = "\u2705 New session started \u00b7 model:";
+  if (modelLabel === defaultLabel) {
+    return `${prefix} ${modelLabel}`;
+  }
+  return `${prefix} ${modelLabel} (default: ${defaultLabel})`;
+  /*
   return modelLabel === defaultLabel
     ? `âœ… New session started Â· model: ${modelLabel}`
     : `âœ… New session started Â· model: ${modelLabel} (default: ${defaultLabel})`;
+  */
 }
 
 function resolveResetSessionNoticeRoute(params: {
@@ -293,6 +302,9 @@ export async function runPreparedReply(
   const isBareSessionReset =
     isNewSession &&
     ((baseBodyTrimmedRaw.length === 0 && rawBodyTrimmed.length > 0) || isBareNewOrReset);
+  const inputProvenance: InputProvenance | undefined = isBareSessionReset
+    ? { kind: "internal_system" }
+    : undefined;
   const baseBodyFinal = isBareSessionReset ? BARE_SESSION_RESET_PROMPT : baseBody;
   const inboundUserContext = buildInboundUserContextPrefix(
     isNewSession
@@ -525,6 +537,7 @@ export async function runPreparedReply(
       blockReplyBreak: resolvedBlockStreamingBreak,
       ownerNumbers: command.ownerList.length > 0 ? command.ownerList : undefined,
       extraSystemPrompt: extraSystemPromptParts.join("\n\n") || undefined,
+      inputProvenance,
       hostedRoutingEligible,
       ...(isReasoningTagProvider(provider) ? { enforceFinalTag: true } : {}),
     },

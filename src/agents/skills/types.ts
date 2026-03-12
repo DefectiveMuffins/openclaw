@@ -1,4 +1,5 @@
 import type { Skill } from "@mariozechner/pi-coding-agent";
+import type { SkillScanSeverity } from "../../security/skill-scanner.js";
 
 export type SkillInstallSpec = {
   id?: string;
@@ -68,6 +69,55 @@ export type SkillEntry = {
   frontmatter: ParsedSkillFrontmatter;
   metadata?: OpenClawSkillMetadata;
   invocation?: SkillInvocationPolicy;
+  audit?: SkillAuditState;
+};
+
+export type SkillAuditStatus =
+  | "not_applicable"
+  | "pending"
+  | "clean"
+  | "warn"
+  | "critical"
+  | "scan_failed";
+
+export type SkillTrustReason =
+  | "bundled"
+  | "plugin_owned"
+  | "approved"
+  | "new"
+  | "changed"
+  | "upgrade_existing"
+  | "upgrade_warn"
+  | "critical_findings"
+  | "scan_failed"
+  | "unreviewed";
+
+export type SkillAuditPreviewFinding = {
+  ruleId: string;
+  severity: SkillScanSeverity;
+  file: string;
+  line: number;
+  message: string;
+};
+
+export type SkillAuditSummary = {
+  scannedFiles: number;
+  critical: number;
+  warn: number;
+  info: number;
+  findingsPreview: SkillAuditPreviewFinding[];
+};
+
+export type SkillAuditState = {
+  canonicalDir?: string;
+  fingerprint?: string;
+  approvedFingerprint?: string;
+  approved: boolean;
+  quarantined: boolean;
+  auditStatus: SkillAuditStatus;
+  auditSummary?: SkillAuditSummary;
+  lastScannedAt?: number;
+  trustReason: SkillTrustReason;
 };
 
 export type SkillEligibilityContext = {

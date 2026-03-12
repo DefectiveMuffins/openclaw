@@ -1,5 +1,6 @@
 param(
   [string]$ConfigPath = "",
+  [string]$StateDir = "",
   [string]$ProviderId = "local",
   [switch]$QwenOnly = $true,
   [switch]$UpdateAgentModels = $true,
@@ -31,7 +32,8 @@ function Set-OrAddProperty {
 function Sync-AgentRuntimeModelsFiles {
   param(
     [object]$Config,
-    [string]$Provider
+    [string]$Provider,
+    [string]$ResolvedStateDir
   )
 
   if ($null -eq $Config -or $null -eq $Config.models -or $null -eq $Config.models.providers) {
@@ -43,7 +45,11 @@ function Sync-AgentRuntimeModelsFiles {
     return 0
   }
 
-  $agentsRoot = Join-Path $repoRoot ".openclaw-state\agents"
+  if ([string]::IsNullOrWhiteSpace($ResolvedStateDir)) {
+    return 0
+  }
+
+  $agentsRoot = Join-Path $ResolvedStateDir "agents"
   if (-not (Test-Path -LiteralPath $agentsRoot)) {
     return 0
   }
@@ -90,6 +96,100 @@ function Resolve-ConfigPath {
   }
   $defaultPath = Join-Path $repoRoot ".openclaw-state\openclaw.windows.json"
   return $defaultPath
+}
+
+function Resolve-StateDir {
+  param(
+    [string]$PathArg,
+    [string]$ResolvedConfigPath
+  )
+
+  $candidate = $PathArg
+  if ([string]::IsNullOrWhiteSpace($candidate)) {
+    $candidate = [Environment]::GetEnvironmentVariable("OPENCLAW_STATE_DIR")
+  }
+  if ([string]::IsNullOrWhiteSpace($candidate)) {
+    if (-not [string]::IsNullOrWhiteSpace($ResolvedConfigPath)) {
+      return (Split-Path -Parent $ResolvedConfigPath)
+    }
+    return (Join-Path $repoRoot ".openclaw-state")
+  }
+
+  if (Test-Path -LiteralPath $candidate) {
+    return (Resolve-Path -LiteralPath $candidate).Path
+  }
+
+  return [System.IO.Path]::GetFullPath($candidate)
+}
+
+function Get-ProviderDefaults {
+  param([string]$Provider)
+
+  $normalized = ""
+  if ($Provider -is [string]) {
+    $normalized = $Provider.Trim().ToLowerInvariant()
+  }
+
+  switch ($normalized) {
+    "local" {
+      return [PSCustomObject]@{
+        baseUrl = "http://127.0.0.1:1234/v1"
+        apiKey = "local"
+        api = "openai-completions"
+      }
+    }
+    "lmstudio" {
+      return [PSCustomObject]@{
+        baseUrl = "http://127.0.0.1:1234/v1"
+        apiKey = "lmstudio"
+        api = "openai-responses"
+      }
+    }
+    default {
+      return $null
+    }
+  }
+}
+
+function Ensure-ProviderConfig {
+  param(
+    [object]$Config,
+    [string]$Provider
+  )
+
+  if ($null -eq $Config.models) {
+    $Config | Add-Member -MemberType NoteProperty -Name models -Value ([PSCustomObject]@{}) -Force
+  }
+  if ($null -eq $Config.models.providers) {
+    $Config.models | Add-Member -MemberType NoteProperty -Name providers -Value ([PSCustomObject]@{}) -Force
+  }
+  if ($null -eq $Config.models.mode) {
+    $Config.models | Add-Member -MemberType NoteProperty -Name mode -Value "merge" -Force
+  }
+
+  $providerConfig = $Config.models.providers.$Provider
+  $defaults = Get-ProviderDefaults -Provider $Provider
+  if ($null -eq $providerConfig) {
+    if ($null -eq $defaults) {
+      throw "Config does not define models.providers.$Provider and no defaults are available."
+    }
+    $providerConfig = [PSCustomObject]@{}
+    $Config.models.providers | Add-Member -MemberType NoteProperty -Name $Provider -Value $providerConfig -Force
+  }
+
+  if ($null -ne $defaults) {
+    if ([string]::IsNullOrWhiteSpace([string]$providerConfig.baseUrl)) {
+      Set-OrAddProperty -Object $providerConfig -Name "baseUrl" -Value $defaults.baseUrl
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$providerConfig.api)) {
+      Set-OrAddProperty -Object $providerConfig -Name "api" -Value $defaults.api
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$providerConfig.apiKey)) {
+      Set-OrAddProperty -Object $providerConfig -Name "apiKey" -Value $defaults.apiKey
+    }
+  }
+
+  return $providerConfig
 }
 
 function Resolve-ProviderApiKey {
@@ -189,19 +289,13 @@ function Resolve-PreferredPrimary {
 }
 
 $resolvedConfigPath = Resolve-ConfigPath -PathArg $ConfigPath
+$resolvedStateDir = Resolve-StateDir -PathArg $StateDir -ResolvedConfigPath $resolvedConfigPath
 if (-not (Test-Path -LiteralPath $resolvedConfigPath)) {
   throw "Config path not found: $resolvedConfigPath"
 }
 
 $cfg = Get-Content -Raw -LiteralPath $resolvedConfigPath | ConvertFrom-Json
-if ($null -eq $cfg.models -or $null -eq $cfg.models.providers) {
-  throw "Config is missing models.providers."
-}
-
-$provider = $cfg.models.providers.$ProviderId
-if ($null -eq $provider) {
-  throw "Config does not define models.providers.$ProviderId."
-}
+$provider = Ensure-ProviderConfig -Config $cfg -Provider $ProviderId
 
 $endpoint = Resolve-ModelsEndpoint -BaseUrl $provider.baseUrl
 $apiKey = Resolve-ProviderApiKey -RawApiKey $provider.apiKey
@@ -231,7 +325,7 @@ if ($ids.Count -eq 0) {
   throw "No matching models discovered from $endpoint (QwenOnly=$QwenOnly)."
 }
 
-$provider.models = @(
+Set-OrAddProperty -Object $provider -Name "models" -Value @(
   $ids | ForEach-Object {
     [PSCustomObject]@{
       id = $_
@@ -252,7 +346,7 @@ if ($null -eq $cfg.agents.defaults.model) {
 
 $currentPrimaryRaw = $cfg.agents.defaults.model.primary
 $chosenPrimary = Resolve-PreferredPrimary -ModelIds $ids -Provider $ProviderId -CurrentPrimaryRaw $currentPrimaryRaw -PreferredRaw $PreferredModel
-$cfg.agents.defaults.model.primary = $chosenPrimary
+Set-OrAddProperty -Object $cfg.agents.defaults.model -Name "primary" -Value $chosenPrimary
 
 $allowedRefs = @($ids | ForEach-Object { Normalize-Ref -Provider $ProviderId -ModelId $_ })
 if ($UpdateAgentModels -and $cfg.agents.list) {
@@ -280,7 +374,7 @@ $json = $cfg | ConvertTo-Json -Depth 100
 
 $runtimeModelsUpdated = 0
 if ($UpdateAgentModels) {
-  $runtimeModelsUpdated = Sync-AgentRuntimeModelsFiles -Config $cfg -Provider $ProviderId
+  $runtimeModelsUpdated = Sync-AgentRuntimeModelsFiles -Config $cfg -Provider $ProviderId -ResolvedStateDir $resolvedStateDir
 }
 
 Write-Output ("RESULT status=ok provider={0} endpoint={1} models={2} primary={3}" -f $ProviderId, $endpoint, $ids.Count, $chosenPrimary)

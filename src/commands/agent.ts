@@ -146,6 +146,21 @@ function prependInternalEventContext(
   return [renderedEvents, body].filter(Boolean).join("\n\n");
 }
 
+type EmbeddedRunPayload = NonNullable<Awaited<ReturnType<typeof runEmbeddedPiAgent>>["payloads"]>[number];
+
+function extractSyntheticAssistantText(
+  payloads: ReadonlyArray<EmbeddedRunPayload> | undefined,
+): string | undefined {
+  const joined = (payloads ?? [])
+    .flatMap((payload) => {
+      const text = typeof payload.text === "string" ? payload.text.trim() : "";
+      return text ? [text] : [];
+    })
+    .join("\n\n")
+    .trim();
+  return joined || undefined;
+}
+
 function runAgentAttempt(params: {
   providerOverride: string;
   modelOverride: string;
@@ -793,6 +808,7 @@ export async function agentCommand(
 
     const startedAt = Date.now();
     let lifecycleEnded = false;
+    let assistantTextEmitted = false;
 
     let result: Awaited<ReturnType<typeof runEmbeddedPiAgent>>;
     let fallbackProvider = provider;
@@ -857,6 +873,11 @@ export async function agentCommand(
             sessionStore,
             storePath,
             onAgentEvent: (evt) => {
+              if (evt.stream === "assistant" && typeof evt.data?.text === "string") {
+                if (evt.data.text.trim()) {
+                  assistantTextEmitted = true;
+                }
+              }
               // Track lifecycle end for fallback emission below.
               if (
                 evt.stream === "lifecycle" &&
@@ -872,6 +893,32 @@ export async function agentCommand(
       result = fallbackResult.result;
       fallbackProvider = fallbackResult.provider;
       fallbackModel = fallbackResult.model;
+      const payloads = result.payloads ?? [];
+      const syntheticAssistantText = !assistantTextEmitted
+        ? extractSyntheticAssistantText(payloads)
+        : undefined;
+      if (syntheticAssistantText) {
+        emitAgentEvent({
+          runId,
+          stream: "assistant",
+          data: {
+            text: syntheticAssistantText,
+            delta: syntheticAssistantText,
+            synthesizedFinal: true,
+          },
+        });
+        if (lifecycleEnded) {
+          emitAgentEvent({
+            runId,
+            stream: "lifecycle",
+            data: {
+              phase: "end",
+              endedAt: Date.now(),
+              synthesizedFinal: true,
+            },
+          });
+        }
+      }
       if (!lifecycleEnded) {
         emitAgentEvent({
           runId,

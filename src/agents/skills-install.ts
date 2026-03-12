@@ -11,6 +11,7 @@ import {
   hasBinary,
   loadWorkspaceSkillEntries,
   resolveSkillsInstallPreferences,
+  type SkillAuditState,
   type SkillEntry,
   type SkillInstallSpec,
   type SkillsInstallPreferences,
@@ -31,6 +32,10 @@ export type SkillInstallResult = {
   stderr: string;
   code: number | null;
   warnings?: string[];
+  audit?: Pick<
+    SkillAuditState,
+    "quarantined" | "auditStatus" | "auditSummary" | "lastScannedAt" | "trustReason"
+  >;
 };
 
 function withWarnings(result: SkillInstallResult, warnings: string[]): SkillInstallResult {
@@ -40,6 +45,22 @@ function withWarnings(result: SkillInstallResult, warnings: string[]): SkillInst
   return {
     ...result,
     warnings: warnings.slice(),
+  };
+}
+
+function withAudit(result: SkillInstallResult, entry?: SkillEntry): SkillInstallResult {
+  if (!entry?.audit) {
+    return result;
+  }
+  return {
+    ...result,
+    audit: {
+      quarantined: entry.audit.quarantined,
+      auditStatus: entry.audit.auditStatus,
+      auditSummary: entry.audit.auditSummary,
+      lastScannedAt: entry.audit.lastScannedAt,
+      trustReason: entry.audit.trustReason,
+    },
   };
 }
 
@@ -392,7 +413,7 @@ async function executeInstallCommand(params: {
 export async function installSkill(params: SkillInstallRequest): Promise<SkillInstallResult> {
   const timeoutMs = Math.min(Math.max(params.timeoutMs ?? 300_000, 1_000), 900_000);
   const workspaceDir = resolveUserPath(params.workspaceDir);
-  const entries = loadWorkspaceSkillEntries(workspaceDir);
+  const entries = loadWorkspaceSkillEntries(workspaceDir, { config: params.config });
   const entry = entries.find((item) => item.skill.name === params.skillName);
   if (!entry) {
     return {
@@ -407,50 +428,56 @@ export async function installSkill(params: SkillInstallRequest): Promise<SkillIn
   const spec = findInstallSpec(entry, params.installId);
   const warnings = await collectSkillInstallScanWarnings(entry);
   if (!spec) {
-    return withWarnings(
-      {
-        ok: false,
-        message: `Installer not found: ${params.installId}`,
-        stdout: "",
-        stderr: "",
-        code: null,
-      },
-      warnings,
+    return withAudit(
+      withWarnings(
+        {
+          ok: false,
+          message: `Installer not found: ${params.installId}`,
+          stdout: "",
+          stderr: "",
+          code: null,
+        },
+        warnings,
+      ),
+      entry,
     );
   }
   if (spec.kind === "download") {
     const downloadResult = await installDownloadSpec({ entry, spec, timeoutMs });
-    return withWarnings(downloadResult, warnings);
+    return withAudit(withWarnings(downloadResult, warnings), entry);
   }
 
   const prefs = resolveSkillsInstallPreferences(params.config);
   const command = buildInstallCommand(spec, prefs);
   if (command.error) {
-    return withWarnings(
-      {
-        ok: false,
-        message: command.error,
-        stdout: "",
-        stderr: "",
-        code: null,
-      },
-      warnings,
+    return withAudit(
+      withWarnings(
+        {
+          ok: false,
+          message: command.error,
+          stdout: "",
+          stderr: "",
+          code: null,
+        },
+        warnings,
+      ),
+      entry,
     );
   }
 
   const brewExe = hasBinary("brew") ? "brew" : resolveBrewExecutable();
   if (spec.kind === "brew" && !brewExe) {
-    return withWarnings(resolveBrewMissingFailure(spec), warnings);
+    return withAudit(withWarnings(resolveBrewMissingFailure(spec), warnings), entry);
   }
 
   const uvInstallFailure = await ensureUvInstalled({ spec, brewExe, timeoutMs });
   if (uvInstallFailure) {
-    return withWarnings(uvInstallFailure, warnings);
+    return withAudit(withWarnings(uvInstallFailure, warnings), entry);
   }
 
   const goInstallFailure = await ensureGoInstalled({ spec, brewExe, timeoutMs });
   if (goInstallFailure) {
-    return withWarnings(goInstallFailure, warnings);
+    return withAudit(withWarnings(goInstallFailure, warnings), entry);
   }
 
   const argv = command.argv ? [...command.argv] : null;
@@ -466,5 +493,8 @@ export async function installSkill(params: SkillInstallRequest): Promise<SkillIn
     }
   }
 
-  return withWarnings(await executeInstallCommand({ argv, timeoutMs, env }), warnings);
+  return withAudit(
+    withWarnings(await executeInstallCommand({ argv, timeoutMs, env }), warnings),
+    entry,
+  );
 }

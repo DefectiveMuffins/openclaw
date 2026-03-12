@@ -15,14 +15,23 @@ export {
   applySkillEnvOverridesFromSnapshot,
 } from "./skills/env-overrides.js";
 export type {
+  SkillAuditState,
+  SkillAuditStatus,
+  SkillAuditSummary,
   OpenClawSkillMetadata,
   SkillEligibilityContext,
   SkillCommandSpec,
   SkillEntry,
   SkillInstallSpec,
   SkillSnapshot,
+  SkillTrustReason,
   SkillsInstallPreferences,
 } from "./skills/types.js";
+export {
+  auditSkillEntries,
+  isThirdPartyStandaloneSkill,
+  setSkillTrustDecision,
+} from "./skills/trust.js";
 export {
   buildWorkspaceSkillSnapshot,
   buildWorkspaceSkillsPrompt,

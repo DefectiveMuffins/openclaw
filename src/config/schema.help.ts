@@ -1042,7 +1042,7 @@ export const FIELD_HELP: Record<string, string> = {
   "agents.defaults.subagents.delegation.mode":
     "Top-level delegation enforcement mode: off disables forcing, soft keeps prompt/retry enforcement, hard enforces manager-only execution with worker completion gating.",
   "agents.defaults.subagents.delegation.scope":
-    "Delegation scope for top-level turns: all enforces delegation on every top-level turn, action_only enforces only when the turn appears task-oriented.",
+    "Delegation scope for top-level turns: all enforces delegation on every top-level turn, action_only enforces only when the turn appears task-oriented. When unset, OpenClaw defaults to action_only.",
   "agents.defaults.subagents.delegation.enabled":
     "Enables delegation-aware spawn defaults such as structured result contracts and bounded research fan-out (default: false). Keep disabled for current freeform subagent behavior, or enable it for more deterministic orchestration.",
   "agents.defaults.subagents.delegation.structuredResults":

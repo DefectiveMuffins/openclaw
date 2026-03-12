@@ -134,15 +134,63 @@ export async function installSkill(
   state.skillsBusyKey = skillKey;
   state.skillsError = null;
   try {
-    const result = await state.client.request<{ message?: string }>("skills.install", {
+    const result = await state.client.request<{
+      message?: string;
+      audit?: {
+        quarantined?: boolean;
+        auditStatus?: string;
+        trustReason?: string;
+      };
+    }>("skills.install", {
       name,
       installId,
       timeoutMs: 120000,
     });
     await loadSkills(state);
+    const auditNote = result?.audit?.quarantined
+      ? ` Skill remains quarantined (${result.audit.auditStatus ?? "pending"}).`
+      : "";
     setSkillMessage(state, skillKey, {
       kind: "success",
-      message: result?.message ?? "Installed",
+      message: `${result?.message ?? "Installed"}${auditNote}`,
+    });
+  } catch (err) {
+    const message = getErrorMessage(err);
+    state.skillsError = message;
+    setSkillMessage(state, skillKey, {
+      kind: "error",
+      message,
+    });
+  } finally {
+    state.skillsBusyKey = null;
+  }
+}
+
+export async function setSkillTrust(
+  state: SkillsState,
+  skillKey: string,
+  action: "approve" | "revoke",
+) {
+  if (!state.client || !state.connected) {
+    return;
+  }
+  state.skillsBusyKey = skillKey;
+  state.skillsError = null;
+  try {
+    const result = await state.client.request<{
+      quarantined?: boolean;
+      auditStatus?: string;
+      trustReason?: string;
+    }>("skills.trust", {
+      skillKey,
+      action,
+    });
+    await loadSkills(state);
+    const statusNote = result?.auditStatus ? ` (${result.auditStatus})` : "";
+    setSkillMessage(state, skillKey, {
+      kind: "success",
+      message:
+        action === "approve" ? `Skill approved${statusNote}` : `Skill trust revoked${statusNote}`,
     });
   } catch (err) {
     const message = getErrorMessage(err);

@@ -27,6 +27,12 @@ import {
   resolveChatRunExpiresAtMs,
 } from "../chat-abort.js";
 import { type ChatImageContent, parseMessageWithAttachments } from "../chat-attachments.js";
+import {
+  appendChatHistorySnapshotMessage,
+  clearChatHistorySnapshot,
+  getChatHistorySnapshot,
+  replaceChatHistorySnapshot,
+} from "../chat-history-snapshots.js";
 import { stripEnvelopeFromMessage, stripEnvelopeFromMessages } from "../chat-sanitize.js";
 import { GATEWAY_CLIENT_CAPS, hasGatewayClientCap } from "../protocol/client-info.js";
 import {
@@ -639,16 +645,37 @@ function nextChatSeq(context: { agentRunSeq: Map<string, number> }, runId: strin
   return next;
 }
 
+function buildChatUserHistoryMessage(message: string, timestamp: number): Record<string, unknown> {
+  return {
+    role: "user",
+    content: [{ type: "text", text: message }],
+    timestamp,
+  };
+}
+
 function broadcastChatFinal(params: {
-  context: Pick<GatewayRequestContext, "broadcast" | "nodeSendToSession" | "agentRunSeq">;
+  context: Pick<
+    GatewayRequestContext,
+    "broadcast" | "nodeSendToSession" | "agentRunSeq" | "chatHistorySnapshots"
+  >;
   runId: string;
   sessionKey: string;
+  snapshotSessionKey?: string;
+  sessionId?: string;
   message?: Record<string, unknown>;
 }) {
   const seq = nextChatSeq({ agentRunSeq: params.context.agentRunSeq }, params.runId);
   const strippedEnvelopeMessage = stripEnvelopeFromMessage(params.message) as
     | Record<string, unknown>
     | undefined;
+  if (strippedEnvelopeMessage) {
+    appendChatHistorySnapshotMessage({
+      store: params.context.chatHistorySnapshots,
+      sessionKey: params.snapshotSessionKey ?? params.sessionKey,
+      sessionId: params.sessionId,
+      message: strippedEnvelopeMessage,
+    });
+  }
   const payload = {
     runId: params.runId,
     sessionKey: params.sessionKey,
@@ -697,10 +724,20 @@ export const chatHandlers: GatewayRequestHandlers = {
       sessionKey: string;
       limit?: number;
     };
-    const { cfg, storePath, entry } = loadSessionEntry(sessionKey);
+    const { cfg, storePath, entry, canonicalKey } = loadSessionEntry(sessionKey);
     const sessionId = entry?.sessionId;
-    const rawMessages =
+    const persistedMessages =
       sessionId && storePath ? readSessionMessages(sessionId, storePath, entry?.sessionFile) : [];
+    const activeRun = findActiveChatRunForSession({
+      chatAbortControllers: context.chatAbortControllers,
+      rawSessionKey: sessionKey,
+      canonicalSessionKey: canonicalKey,
+    });
+    const snapshot = getChatHistorySnapshot(context.chatHistorySnapshots, canonicalKey);
+    const rawMessages =
+      activeRun && persistedMessages.length === 0 && (snapshot?.messages.length ?? 0) > 0
+        ? (snapshot?.messages ?? persistedMessages)
+        : persistedMessages;
     const hardMax = 1000;
     const defaultLimit = 200;
     const requested = typeof limit === "number" ? limit : defaultLimit;
@@ -716,6 +753,12 @@ export const chatHandlers: GatewayRequestHandlers = {
     });
     const capped = capArrayByJsonBytes(replaced.messages, maxHistoryBytes).items;
     const bounded = enforceChatHistoryFinalBudget({ messages: capped, maxBytes: maxHistoryBytes });
+    replaceChatHistorySnapshot({
+      store: context.chatHistorySnapshots,
+      sessionKey: canonicalKey,
+      sessionId,
+      messages: bounded.messages,
+    });
     const placeholderCount = replaced.replacedCount + bounded.placeholderCount;
     if (placeholderCount > 0) {
       chatHistoryPlaceholderEmitCount += placeholderCount;
@@ -886,7 +929,7 @@ export const chatHandlers: GatewayRequestHandlers = {
     const now = Date.now();
     const clientRunId = p.idempotencyKey;
 
-    const sendPolicy = resolveSendPolicy({
+      const sendPolicy = resolveSendPolicy({
       cfg,
       entry,
       sessionKey,
@@ -1019,6 +1062,16 @@ export const chatHandlers: GatewayRequestHandlers = {
         sessionKey,
         config: cfg,
       });
+      if (rawMessage === "/new" || rawMessage === "/reset") {
+        clearChatHistorySnapshot(context.chatHistorySnapshots, sessionKey);
+      } else {
+        appendChatHistorySnapshotMessage({
+          store: context.chatHistorySnapshots,
+          sessionKey,
+          sessionId: entry?.sessionId,
+          message: buildChatUserHistoryMessage(parsedMessage, now),
+        });
+      }
       const { onModelSelected, ...prefixOptions } = createReplyPrefixOptions({
         cfg,
         agentId,
@@ -1087,14 +1140,15 @@ export const chatHandlers: GatewayRequestHandlers = {
               .filter(Boolean)
               .join("\n\n")
               .trim();
+            let latestSessionId = entry?.sessionId ?? clientRunId;
             let message: Record<string, unknown> | undefined;
             if (combinedReply) {
               const { storePath: latestStorePath, entry: latestEntry } =
                 loadSessionEntry(sessionKey);
-              const sessionId = latestEntry?.sessionId ?? entry?.sessionId ?? clientRunId;
+              latestSessionId = latestEntry?.sessionId ?? entry?.sessionId ?? clientRunId;
               const appended = appendAssistantTranscriptMessage({
                 message: combinedReply,
-                sessionId,
+                sessionId: latestSessionId,
                 storePath: latestStorePath,
                 sessionFile: latestEntry?.sessionFile,
                 agentId,
@@ -1122,6 +1176,8 @@ export const chatHandlers: GatewayRequestHandlers = {
               context,
               runId: clientRunId,
               sessionKey: rawSessionKey,
+              snapshotSessionKey: sessionKey,
+              sessionId: latestSessionId,
               message,
             });
           }
@@ -1192,7 +1248,7 @@ export const chatHandlers: GatewayRequestHandlers = {
 
     // Load session to find transcript file
     const rawSessionKey = p.sessionKey;
-    const { cfg, storePath, entry } = loadSessionEntry(rawSessionKey);
+    const { cfg, storePath, entry, canonicalKey } = loadSessionEntry(rawSessionKey);
     const sessionId = entry?.sessionId;
     if (!sessionId || !storePath) {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "session not found"));
@@ -1221,6 +1277,12 @@ export const chatHandlers: GatewayRequestHandlers = {
     }
 
     // Broadcast to webchat for immediate UI update
+    appendChatHistorySnapshotMessage({
+      store: context.chatHistorySnapshots,
+      sessionKey: canonicalKey,
+      sessionId,
+      message: appended.message,
+    });
     const chatPayload = {
       runId: `inject-${appended.messageId}`,
       sessionKey: rawSessionKey,
